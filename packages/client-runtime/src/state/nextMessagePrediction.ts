@@ -34,35 +34,32 @@ export function nextMessagePredictionKey(input: {
   return { threadId: input.threadId, assistantMessageId: input.latestRun.assistantMessageId };
 }
 
+/** `prediction` must come from the query for `key`; the atom family keeps threads apart. */
 export function selectVisiblePrediction(input: {
   readonly key: PredictionKey | null;
-  readonly result: { readonly key: PredictionKey; readonly prediction: string | null } | null;
+  readonly prediction: string | null | undefined;
   readonly composerEmpty: boolean;
   readonly dismissedAssistantMessageId: MessageId | null;
 }): string | null {
-  const { key, result } = input;
   if (
-    key === null ||
-    result === null ||
+    input.key === null ||
     !input.composerEmpty ||
-    result.key.threadId !== key.threadId ||
-    result.key.assistantMessageId !== key.assistantMessageId ||
-    input.dismissedAssistantMessageId === key.assistantMessageId
+    input.dismissedAssistantMessageId === input.key.assistantMessageId
   ) {
     return null;
   }
-  return result.prediction;
+  return input.prediction ?? null;
 }
 
 export function createNextMessagePredictionAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
-    // A prediction answers one finished reply, so it never needs refreshing.
+    // A prediction answers one finished reply, so it never goes stale.
     prediction: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:composer:next-message-prediction",
       tag: WS_METHODS.composerPredictNextMessage,
-      isFinal: () => true,
+      staleTimeMs: Number.POSITIVE_INFINITY,
       idleTtlMs: 10 * 60_000,
     }),
   };

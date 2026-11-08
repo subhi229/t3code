@@ -46,7 +46,7 @@ describe("selectVisiblePrediction", () => {
   const key: PredictionKey = { threadId, assistantMessageId };
   const visible = {
     key,
-    result: { key, prediction: "Run the tests" },
+    prediction: "Run the tests",
     composerEmpty: true,
     dismissedAssistantMessageId: null,
   };
@@ -67,16 +67,8 @@ describe("selectVisiblePrediction", () => {
   it.each([
     ["the composer has text", { composerEmpty: false }],
     ["there is no key", { key: null }],
-    ["there is no result yet", { result: null }],
-    ["the model found nothing open", { result: { key, prediction: null } }],
-    [
-      "the result belongs to another thread",
-      { result: { key: { ...key, threadId: ThreadId.make("thread-2") }, prediction: "x" } },
-    ],
-    [
-      "a newer reply arrived",
-      { result: { key: { ...key, assistantMessageId: MessageId.make("old") }, prediction: "x" } },
-    ],
+    ["there is no result yet", { prediction: undefined }],
+    ["the model found nothing open", { prediction: null }],
     ["this reply was dismissed", { dismissedAssistantMessageId: assistantMessageId }],
   ] as const)("returns null when %s", (_, override) => {
     expect(selectVisiblePrediction({ ...visible, ...override })).toBeNull();

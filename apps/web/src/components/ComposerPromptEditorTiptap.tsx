@@ -1789,12 +1789,12 @@ function ComposerPromptEditorTiptapInner(
                 )}
               >
                 {prediction ? (
-                  <>
-                    {prediction}
-                    <kbd className="ms-2 rounded border border-current px-1 font-sans text-2xs opacity-70">
+                  <span className="flex items-start gap-2">
+                    <span className="line-clamp-2 min-w-0">{prediction}</span>
+                    <kbd className="mt-0.5 shrink-0 rounded border border-current px-1 font-sans text-2xs opacity-70">
                       Tab
                     </kbd>
-                  </>
+                  </span>
                 ) : (
                   placeholder
                 )}
