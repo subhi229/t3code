@@ -696,6 +696,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["composer rich text tiptap bold italic markdown styled wysiwyg"],
   },
   {
+    id: "composer-predictions",
+    title: "Show predictions",
+    to: "/settings/chat",
+    searchTerms: ["predictions predict next message suggestion ghost text autocomplete tab"],
+  },
+  {
     id: "send-shortcut",
     title: "Send shortcut",
     to: "/settings/chat",

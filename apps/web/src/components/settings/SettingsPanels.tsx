@@ -524,6 +524,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
       ? ["Rich text composer"]
       : []),
+    ...(settings.composerPredictionsEnabled !== DEFAULT_UNIFIED_SETTINGS.composerPredictionsEnabled
+      ? ["Show predictions"]
+      : []),
     ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
     ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
       ? ["Follow-up behavior"]
@@ -643,6 +646,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
+      composerPredictionsEnabled: DEFAULT_UNIFIED_SETTINGS.composerPredictionsEnabled,
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
@@ -1112,6 +1116,32 @@ export function ChatSettingsPanel() {
                 updateSettings({ composerRichTextEnabled: Boolean(checked) })
               }
               aria-label="Rich text composer"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("composer-predictions")}
+          description="Predict your next message based on the conversation"
+          resetAction={
+            settings.composerPredictionsEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.composerPredictionsEnabled ? (
+              <SettingResetButton
+                label="predictions"
+                onClick={() =>
+                  updateSettings({
+                    composerPredictionsEnabled: DEFAULT_UNIFIED_SETTINGS.composerPredictionsEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.composerPredictionsEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ composerPredictionsEnabled: Boolean(checked) })
+              }
+              aria-label="Show predictions"
             />
           }
         />
