@@ -5,7 +5,7 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import { latestExecutedRun } from "@t3tools/shared/orchestrationV2ThreadError";
+import { latestExecutedRun, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
@@ -89,19 +89,21 @@ const make = Effect.gen(function* () {
     // Not ready yet or superseded: report it uncached so a later request can still predict.
     if (latestRun?.status !== "completed") return yield* new NotLatestReply();
 
-    const ordinals = new Map(runs.map((run) => [run.id, run.ordinal]));
-    const recentRunIds = runs
+    // Held queues can run out of ordinal order, so recency follows when each run ran.
+    const executed = runs
       .filter((run) => run.status !== "queued" && run.startedAt !== null)
-      .toSorted((left, right) => right.ordinal - left.ordinal)
-      .slice(0, RECENT_RUNS)
-      .map((run) => run.id);
-    const ordinalOf = (runId: RunId | null) => (runId === null ? -1 : (ordinals.get(runId) ?? -1));
+      .toSorted((left, right) =>
+        runRanAfter(left, right) ? 1 : runRanAfter(right, left) ? -1 : 0,
+      );
+    const ranks = new Map(executed.map((run, index) => [run.id, index]));
+    const recentRunIds = executed.slice(-RECENT_RUNS).map((run) => run.id);
+    const rankOf = (runId: RunId | null) => (runId === null ? -1 : (ranks.get(runId) ?? -1));
     const messages = (yield* threads.getThreadRecords(input.threadId, ["messages"], {
       messageRoles: ["user", "assistant"],
       messageRunIds: recentRunIds,
     })).messages.toSorted(
       (left, right) =>
-        ordinalOf(left.runId) - ordinalOf(right.runId) ||
+        rankOf(left.runId) - rankOf(right.runId) ||
         DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt) ||
         Number(left.role === "assistant") - Number(right.role === "assistant"),
     );
@@ -119,10 +121,10 @@ const make = Effect.gen(function* () {
     >(kind: K) {
       const candidates = structure.plans.filter(
         (plan): plan is Extract<OrchestrationV2PlanArtifact, { kind: K }> =>
-          plan.kind === kind && plan.status !== "superseded" && ordinalOf(plan.runId) >= 0,
+          plan.kind === kind && plan.status !== "superseded" && rankOf(plan.runId) >= 0,
       );
-      const newestOrdinal = Math.max(-1, ...candidates.map((plan) => ordinalOf(plan.runId)));
-      const inRun = candidates.filter((plan) => ordinalOf(plan.runId) === newestOrdinal);
+      const newestOrdinal = Math.max(-1, ...candidates.map((plan) => rankOf(plan.runId)));
+      const inRun = candidates.filter((plan) => rankOf(plan.runId) === newestOrdinal);
       if (inRun.length <= 1) return inRun[0] ?? null;
       const items = (yield* threads.getThreadRecords(input.threadId, ["turnItems"], {
         turnItemRunIds: [inRun[0]!.runId!],
@@ -135,8 +137,13 @@ const make = Effect.gen(function* () {
       }
       return inRun.at(-1) ?? null;
     });
-    const todoList = yield* latestPlan("todo_list");
-    const proposedPlan = todoList === null ? yield* latestPlan("proposed_plan") : null;
+    const latestTodoList = yield* latestPlan("todo_list");
+    const latestProposedPlan = yield* latestPlan("proposed_plan");
+    // Only the newer of the two describes the current work; one run may hold both.
+    const todoRank = rankOf(latestTodoList?.runId ?? null);
+    const planRank = rankOf(latestProposedPlan?.runId ?? null);
+    const todoList = todoRank >= planRank ? latestTodoList : null;
+    const proposedPlan = planRank >= todoRank ? latestProposedPlan : null;
     const turnItems = (yield* threads.getThreadRecords(input.threadId, ["turnItems"], {
       turnItemRunIds: [latestRun.id],
       turnItemTypes: [...TOOL_TURN_ITEM_TYPES],

@@ -1890,28 +1890,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
   });
   const { blocksSubmission: voiceInputActive, submitAfterDictation } = speechInput;
-  const predictionKey = nextMessagePredictionKey({
-    enabled:
-      settings.composerPredictionsEnabled &&
-      canOperateThread &&
-      !isSendBusy &&
-      !isCompacting &&
-      !isPreparingWorktree &&
-      !isRevertingCheckpoint,
-    threadId: routeKind === "draft" ? null : activeThreadId,
-    latestRun,
-    latestRunSettled,
-    phase,
-    hasPendingApproval: pendingApprovals.length > 0,
-    hasPendingUserInput: pendingUserInputs.length > 0,
-  });
-  const predictionQuery = useEnvironmentQuery(
-    predictionKey
-      ? nextMessagePrediction.prediction({ environmentId, input: predictionKey })
-      : null,
-  );
-  const [dismissedPredictionMessageId, setDismissedPredictionMessageId] =
-    useState<MessageId | null>(null);
   // Tab is the only way to accept, so touch screens without a keyboard never see predictions.
   const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
   // Predictions only stand in for the default placeholder, never for a prompt that asks for something.
@@ -1925,21 +1903,45 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     !speechInput.freezesEditor &&
     !isCoarsePointer &&
     !isSoftwareKeyboardOpen;
-  const visiblePrediction = predictionAllowed
-    ? selectVisiblePrediction({
-        key: predictionKey,
-        prediction: predictionQuery.data?.prediction,
-        composerEmpty:
-          prompt.length === 0 &&
-          composerContextRecords.size === 0 &&
-          composerImages.length + composerFiles.length === 0 &&
-          composerDraft.persistedAttachments.length === 0 &&
-          composerTerminalContexts.length === 0 &&
-          composerPreviewAnnotations.length === 0 &&
-          composerReviewComments.length === 0,
-        dismissedAssistantMessageId: dismissedPredictionMessageId,
-      })
-    : null;
+  const composerEmpty =
+    prompt.length === 0 &&
+    composerContextRecords.size === 0 &&
+    composerImages.length + composerFiles.length === 0 &&
+    composerDraft.persistedAttachments.length === 0 &&
+    composerTerminalContexts.length === 0 &&
+    composerPreviewAnnotations.length === 0 &&
+    composerReviewComments.length === 0;
+  // Every reason a prediction could not show also keeps it from being requested.
+  const predictionKey = nextMessagePredictionKey({
+    enabled:
+      settings.composerPredictionsEnabled &&
+      canOperateThread &&
+      predictionAllowed &&
+      composerEmpty &&
+      !isSendBusy &&
+      !isCompacting &&
+      !isPreparingWorktree &&
+      !isRevertingCheckpoint,
+    threadId: routeKind === "draft" ? null : activeThreadId,
+    latestRun,
+    latestRunSettled,
+    phase,
+    hasPendingApproval: pendingApprovals.length > 0,
+    hasPendingUserInput: incomingPendingUserInputs.length > 0,
+  });
+  const predictionQuery = useEnvironmentQuery(
+    predictionKey
+      ? nextMessagePrediction.prediction({ environmentId, input: predictionKey })
+      : null,
+  );
+  const [dismissedPredictionMessageId, setDismissedPredictionMessageId] =
+    useState<MessageId | null>(null);
+  const visiblePrediction = selectVisiblePrediction({
+    key: predictionKey,
+    prediction: predictionQuery.data?.prediction,
+    composerEmpty,
+    dismissedAssistantMessageId: dismissedPredictionMessageId,
+  });
   const voiceSendDisabledReason =
     sendDisabledReason ?? (speechInput.preparing ? "Preparing voice input" : null);
   const dictationShortcutLabel = useDictationShortcut({

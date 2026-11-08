@@ -113,11 +113,13 @@ function recordRun(input: {
   readonly assistantStreaming?: boolean;
   readonly status?: OrchestrationV2RunStatus;
   readonly started?: boolean;
+  readonly completedMinutesLater?: number;
   readonly extraEvents?: (now: DateTime.Utc) => ReadonlyArray<OrchestrationV2DomainEvent>;
 }) {
   return Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
     const now = yield* DateTime.now;
+    const completedAt = DateTime.add(now, { minutes: input.completedMinutesLater ?? 0 });
     const providerThreadId = ProviderThreadId.make(`${input.threadId}:provider`);
     const message = (role: "user" | "assistant", text: string, streaming: boolean) => ({
       id: EventId.make(`${input.runId}:${role}`),
@@ -161,7 +163,7 @@ function recordRun(input: {
             status: input.status ?? "completed",
             requestedAt: now,
             startedAt: input.started === false ? null : now,
-            completedAt: input.started === false ? null : now,
+            completedAt: input.started === false ? null : completedAt,
             checkpointId: null,
             contextHandoffId: null,
           },
@@ -230,6 +232,31 @@ function turnItem(input: {
       completedAt: input.now,
       updatedAt: input.now,
       ...input.fields,
+    },
+  } as OrchestrationV2DomainEvent;
+}
+
+function proposedPlanEvent(
+  threadId: ThreadId,
+  runId: RunId,
+  id: string,
+  markdown: string,
+  now: DateTime.Utc,
+) {
+  return {
+    id: EventId.make(`${runId}:plan:${id}`),
+    type: "plan.updated",
+    threadId,
+    runId,
+    occurredAt: now,
+    payload: {
+      id: PlanId.make(id),
+      threadId,
+      runId,
+      nodeId: NodeId.make(`${runId}:node`),
+      status: "active",
+      kind: "proposed_plan",
+      markdown,
     },
   } as OrchestrationV2DomainEvent;
 }
@@ -500,6 +527,68 @@ describe("NextMessagePredictionService", () => {
       assert.include(context, "file_change (completed): src/login.ts");
       assert.include(context, "command_execution (completed): vp test run src/login.test.ts");
       assert.notInclude(context, "more");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("orders exchanges by when their runs ran", () => {
+    const harness = makeHarness(predicted);
+    return Effect.gen(function* () {
+      const service = yield* NextMessagePrediction.NextMessagePredictionService;
+      const threadId = yield* createThread("thread:held-order");
+      const latest = yield* recordRun({
+        threadId,
+        runId: RunId.make("run:held-order:1"),
+        ordinal: 1,
+        user: "held request",
+        assistant: "HELD-REPLY",
+        completedMinutesLater: 5,
+      });
+      yield* recordRun({
+        threadId,
+        runId: RunId.make("run:held-order:2"),
+        ordinal: 2,
+        user: "later request",
+        assistant: "EARLIER-REPLY",
+      });
+
+      yield* service.predict({ threadId, assistantMessageId: latest });
+
+      const context = harness.generateNextMessagePrediction.mock.calls[0]?.[0].context ?? "";
+      assert.isAbove(context.indexOf("HELD-REPLY"), context.indexOf("EARLIER-REPLY"));
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("prefers a newer proposed plan over an older todo list", () => {
+    const harness = makeHarness(predicted);
+    return Effect.gen(function* () {
+      const service = yield* NextMessagePrediction.NextMessagePredictionService;
+      const threadId = yield* createThread("thread:plan-recency");
+      const first = RunId.make("run:plan-recency:1");
+      const second = RunId.make("run:plan-recency:2");
+      yield* recordRun({
+        threadId,
+        runId: first,
+        ordinal: 1,
+        user: "make a checklist",
+        assistant: "Checklist ready.",
+        extraEvents: (now) => [todoPlan(threadId, first, "plan:todo", "OLD-STEP", now)],
+      });
+      const latest = yield* recordRun({
+        threadId,
+        runId: second,
+        ordinal: 2,
+        user: "propose a new plan",
+        assistant: "Here is the plan.",
+        extraEvents: (now) => [
+          proposedPlanEvent(threadId, second, "plan:proposed", "NEW-PLAN", now),
+        ],
+      });
+
+      yield* service.predict({ threadId, assistantMessageId: latest });
+
+      const context = harness.generateNextMessagePrediction.mock.calls[0]?.[0].context ?? "";
+      assert.include(context, "NEW-PLAN");
+      assert.notInclude(context, "OLD-STEP");
     }).pipe(Effect.provide(harness.layer));
   });
 });

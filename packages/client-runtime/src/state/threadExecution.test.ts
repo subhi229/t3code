@@ -21,6 +21,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { v2Projection } from "./orchestrationV2TestFixtures.ts";
 import {
   deriveReportedModelSelection,
+  deriveLatestExecutedThreadRun,
   deriveLatestThreadRun,
   deriveProviderSubagentStatus,
   deriveProviderExtensionStatuses,
@@ -299,6 +300,19 @@ describe("thread execution presentation", () => {
       status: "running",
       turnEnded: true,
     });
+  });
+
+  it("answers predictions for the run that executed, not a cancelled or rolled-back one", () => {
+    const completed = { ...run("run-completed", 1, "completed"), completedAt: now };
+    const cancelledQueued = { ...run("run-cancelled", 2, "cancelled"), startedAt: null };
+    const rolledBack = { ...run("run-rolled-back", 3, "rolled_back"), completedAt: now };
+    const projection = {
+      ...v2Projection,
+      runs: [completed, cancelledQueued, rolledBack],
+      updatedAt: now,
+    };
+
+    expect(deriveLatestExecutedThreadRun(projection)?.runId).toBe(completed.id);
   });
 
   it("presents a held queue as the stopped run instead of queued work", () => {

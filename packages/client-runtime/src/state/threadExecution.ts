@@ -151,6 +151,14 @@ export function deriveLatestThreadRun(projection: ThreadStructure): ThreadRunSum
   return run === null ? null : summarizeThreadRun(projection, run);
 }
 
+/** The run a next-message prediction answers; the server picks the same one. */
+export function deriveLatestExecutedThreadRun(
+  projection: ThreadStructure,
+): ThreadRunSummary | null {
+  const run = latestExecutedRun(projection.runs.filter((run) => run.status !== "rolled_back"));
+  return run === null ? null : summarizeThreadRun(projection, run);
+}
+
 export function deriveThreadActivityRun(projection: ThreadStructure): ThreadRunSummary | null {
   const run =
     latestMatchingRun(projection, (candidate) => ACTIVITY_RUN_STATUSES.has(candidate.status)) ??

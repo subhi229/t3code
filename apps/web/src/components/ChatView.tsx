@@ -81,6 +81,7 @@ import {
   formatModelSelectionEffort,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
+  deriveLatestExecutedThreadRun,
   deriveLatestThreadRun,
   deriveThreadStructureRuntime,
   limitRecoveryOwnsSnooze,
@@ -1100,6 +1101,11 @@ export default function ChatView(props: ChatViewProps) {
   const [chatCanvasStore] = useState(createChatCanvasStore);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
+  const predictionRun =
+    isServerThread && serverProjection !== null
+      ? deriveLatestExecutedThreadRun(serverProjection)
+      : null;
+  const predictionRunSettled = isLatestRunSettled(predictionRun, activeRuntime);
   const activeThreadEnvironmentId = activeThread?.environmentId;
   const activeThreadProjectId = activeThread?.projectId;
   const activeProjectRef =
@@ -3615,8 +3621,8 @@ export default function ChatView(props: ChatViewProps) {
                             {!composerMounted ? null : (
                               <ChatComposer
                                 canOperateThread={canOperateThread}
-                                latestRun={activeLatestRun}
-                                latestRunSettled={latestRunSettled}
+                                latestRun={predictionRun}
+                                latestRunSettled={predictionRunSettled}
                                 reportedModelSelection={reportedModelSelection}
                                 multipleModelSelections={multipleModelSelections}
                                 supportsMultipleModels={
