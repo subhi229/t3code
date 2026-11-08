@@ -123,8 +123,8 @@ const make = Effect.gen(function* () {
         (plan): plan is Extract<OrchestrationV2PlanArtifact, { kind: K }> =>
           plan.kind === kind && plan.status !== "superseded" && rankOf(plan.runId) >= 0,
       );
-      const newestOrdinal = Math.max(-1, ...candidates.map((plan) => rankOf(plan.runId)));
-      const inRun = candidates.filter((plan) => rankOf(plan.runId) === newestOrdinal);
+      const newestRank = Math.max(-1, ...candidates.map((plan) => rankOf(plan.runId)));
+      const inRun = candidates.filter((plan) => rankOf(plan.runId) === newestRank);
       if (inRun.length <= 1) return inRun[0] ?? null;
       const items = (yield* threads.getThreadRecords(input.threadId, ["turnItems"], {
         turnItemRunIds: [inRun[0]!.runId!],

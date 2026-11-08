@@ -3621,8 +3621,8 @@ export default function ChatView(props: ChatViewProps) {
                             {!composerMounted ? null : (
                               <ChatComposer
                                 canOperateThread={canOperateThread}
-                                latestRun={predictionRun}
-                                latestRunSettled={predictionRunSettled}
+                                predictionRun={predictionRun}
+                                predictionRunSettled={predictionRunSettled}
                                 reportedModelSelection={reportedModelSelection}
                                 multipleModelSelections={multipleModelSelections}
                                 supportsMultipleModels={

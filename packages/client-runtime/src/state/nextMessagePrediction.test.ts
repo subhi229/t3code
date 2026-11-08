@@ -48,7 +48,7 @@ describe("selectVisiblePrediction", () => {
     key,
     prediction: "Run the tests",
     composerEmpty: true,
-    dismissedAssistantMessageId: null,
+    dismissed: new Set<MessageId>(),
   };
 
   it("shows the prediction for the current reply in an empty composer", () => {
@@ -59,7 +59,7 @@ describe("selectVisiblePrediction", () => {
     expect(
       selectVisiblePrediction({
         ...visible,
-        dismissedAssistantMessageId: MessageId.make("older"),
+        dismissed: new Set([MessageId.make("older")]),
       }),
     ).toBe("Run the tests");
   });
@@ -69,7 +69,11 @@ describe("selectVisiblePrediction", () => {
     ["there is no key", { key: null }],
     ["there is no result yet", { prediction: undefined }],
     ["the model found nothing open", { prediction: null }],
-    ["this reply was dismissed", { dismissedAssistantMessageId: assistantMessageId }],
+    ["this reply was dismissed", { dismissed: new Set([assistantMessageId]) }],
+    [
+      "this reply was dismissed before another thread's",
+      { dismissed: new Set([assistantMessageId, MessageId.make("other-thread-reply")]) },
+    ],
   ] as const)("returns null when %s", (_, override) => {
     expect(selectVisiblePrediction({ ...visible, ...override })).toBeNull();
   });

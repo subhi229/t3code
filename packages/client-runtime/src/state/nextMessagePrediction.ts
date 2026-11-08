@@ -39,12 +39,13 @@ export function selectVisiblePrediction(input: {
   readonly key: PredictionKey | null;
   readonly prediction: string | null | undefined;
   readonly composerEmpty: boolean;
-  readonly dismissedAssistantMessageId: MessageId | null;
+  /** Replies whose prediction the user hid; each stays hidden until a newer reply. */
+  readonly dismissed: ReadonlySet<MessageId>;
 }): string | null {
   if (
     input.key === null ||
     !input.composerEmpty ||
-    input.dismissedAssistantMessageId === input.key.assistantMessageId
+    input.dismissed.has(input.key.assistantMessageId)
   ) {
     return null;
   }

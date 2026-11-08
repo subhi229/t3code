@@ -382,8 +382,8 @@ export interface ChatComposerProps {
   projectSelectionRequired: boolean;
 
   phase: SessionPhase;
-  latestRun: Pick<ThreadRunSummary, "status" | "assistantMessageId"> | null;
-  latestRunSettled: boolean;
+  predictionRun: Pick<ThreadRunSummary, "status" | "assistantMessageId"> | null;
+  predictionRunSettled: boolean;
   canInterrupt: boolean;
   isSendBusy: boolean;
   canResume: boolean;
@@ -541,8 +541,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
-    latestRun,
-    latestRunSettled,
+    predictionRun,
+    predictionRunSettled,
     canInterrupt,
     isSendBusy,
     canResume,
@@ -1923,8 +1923,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       !isPreparingWorktree &&
       !isRevertingCheckpoint,
     threadId: routeKind === "draft" ? null : activeThreadId,
-    latestRun,
-    latestRunSettled,
+    latestRun: predictionRun,
+    latestRunSettled: predictionRunSettled,
     phase,
     hasPendingApproval: pendingApprovals.length > 0,
     hasPendingUserInput: incomingPendingUserInputs.length > 0,
@@ -1934,13 +1934,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? nextMessagePrediction.prediction({ environmentId, input: predictionKey })
       : null,
   );
-  const [dismissedPredictionMessageId, setDismissedPredictionMessageId] =
-    useState<MessageId | null>(null);
+  const [dismissedPredictions, setDismissedPredictions] = useState<ReadonlySet<MessageId>>(
+    () => new Set(),
+  );
   const visiblePrediction = selectVisiblePrediction({
     key: predictionKey,
     prediction: predictionQuery.data?.prediction,
     composerEmpty,
-    dismissedAssistantMessageId: dismissedPredictionMessageId,
+    dismissed: dismissedPredictions,
   });
   const voiceSendDisabledReason =
     sendDisabledReason ?? (speechInput.preparing ? "Preparing voice input" : null);
@@ -2410,7 +2411,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitComposer,
       prediction: visiblePrediction,
       dismissPrediction: () => {
-        if (predictionKey) setDismissedPredictionMessageId(predictionKey.assistantMessageId);
+        if (predictionKey) {
+          const { assistantMessageId } = predictionKey;
+          setDismissedPredictions((current) => new Set(current).add(assistantMessageId));
+        }
       },
     })(key, event, isTaskItem);
 
