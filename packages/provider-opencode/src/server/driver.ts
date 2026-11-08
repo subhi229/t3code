@@ -162,6 +162,11 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateTranscriptionPostProcessing(input),
         v2: v2.generateTranscriptionPostProcessing(input),
       }),
+    generateNextMessagePrediction: (input) =>
+      byOpenCodeRuntime(probe.get, {
+        v1: v1.generateNextMessagePrediction(input),
+        v2: v2.generateNextMessagePrediction(input),
+      }),
   };
 }
 

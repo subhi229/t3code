@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { limitSection, sanitizeCommitSubject, sanitizeThreadTitle } from "./textGenerationUtils.ts";
+import {
+  limitSection,
+  MAX_NEXT_MESSAGE_PREDICTION_CHARS,
+  sanitizeCommitSubject,
+  sanitizeNextMessagePrediction,
+  sanitizeThreadTitle,
+} from "./textGenerationUtils.ts";
 
 describe("limitSection", () => {
   it("cuts a long section without splitting an emoji", () => {
@@ -31,5 +37,28 @@ describe("sanitizeThreadTitle", () => {
     const title = `${prefix}${character} more`;
 
     expect(sanitizeThreadTitle(title)).toBe(`${prefix}${retained}...`);
+  });
+});
+
+describe("sanitizeNextMessagePrediction", () => {
+  it.each([
+    [null, null],
+    ["", null],
+    ["   ", null],
+    ['"Run the tests and show me failures"', "Run the tests and show me failures"],
+    ["User: commit this", "commit this"],
+    ["Prediction: commit this", "commit this"],
+    ["next message: commit this", "commit this"],
+    ["line one\nline two", "line one line two"],
+    ["`ship it`", "ship it"],
+  ])("sanitizeNextMessagePrediction(%j) -> %j", (raw, expected) => {
+    expect(sanitizeNextMessagePrediction(raw)).toBe(expected);
+  });
+
+  it("caps predictions at a word boundary", () => {
+    const out = sanitizeNextMessagePrediction("word ".repeat(100));
+    expect(out).not.toBeNull();
+    expect(out!.length).toBeLessThanOrEqual(MAX_NEXT_MESSAGE_PREDICTION_CHARS);
+    expect(out!.endsWith("word")).toBe(true);
   });
 });

@@ -1,4 +1,7 @@
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
+
+import { buildNextMessagePredictionPrompt } from "./textGenerationPrompts.ts";
 
 import { normalizeCliError } from "./textGenerationUtils.ts";
 
@@ -13,5 +16,16 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("buildNextMessagePredictionPrompt", () => {
+  it("embeds the conversation context and accepts a null prediction", () => {
+    const { prompt, outputSchema } = buildNextMessagePredictionPrompt({ context: "CTX-MARKER" });
+    const decode = Schema.decodeUnknownSync(outputSchema);
+
+    expect(prompt).toContain("CTX-MARKER");
+    expect(decode({ prediction: null })).toEqual({ prediction: null });
+    expect(decode({ prediction: "x" })).toEqual({ prediction: "x" });
   });
 });

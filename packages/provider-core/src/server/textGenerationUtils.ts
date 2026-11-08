@@ -85,6 +85,30 @@ export function sanitizeThreadTitle(raw: string): string {
   return `${normalized.slice(0, end).trimEnd()}...`;
 }
 
+export const MAX_NEXT_MESSAGE_PREDICTION_CHARS = 280;
+
+export function sanitizeNextMessagePrediction(raw: string | null): string | null {
+  if (raw === null) return null;
+  const normalized = raw
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .trim()
+    .replace(/^(?:user|prediction|next message)\s*:\s*/i, "")
+    .trim();
+  if (normalized.length === 0) return null;
+  if (normalized.length <= MAX_NEXT_MESSAGE_PREDICTION_CHARS) return normalized;
+  const window = normalized.slice(0, MAX_NEXT_MESSAGE_PREDICTION_CHARS + 1);
+  const lastSpace = window.lastIndexOf(" ");
+  if (lastSpace > 0) return window.slice(0, lastSpace).trimEnd();
+  const last = normalized.charCodeAt(MAX_NEXT_MESSAGE_PREDICTION_CHARS - 1);
+  const end =
+    last >= 0xd800 && last <= 0xdbff
+      ? MAX_NEXT_MESSAGE_PREDICTION_CHARS - 1
+      : MAX_NEXT_MESSAGE_PREDICTION_CHARS;
+  return normalized.slice(0, end);
+}
+
 function cliLabel(cliName: string): string {
   const capitalized = cliName.charAt(0).toUpperCase() + cliName.slice(1);
   return `${capitalized} CLI (\`${cliName}\`)`;
