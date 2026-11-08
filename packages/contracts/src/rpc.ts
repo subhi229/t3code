@@ -174,6 +174,10 @@ import {
 } from "./guestShare.ts";
 import { PullRequestReviewGuideResult } from "./pullRequestReviewGuide.ts";
 import {
+  ComposerPredictNextMessageInput,
+  ComposerPredictNextMessageResult,
+} from "./composerPrediction.ts";
+import {
   PullRequestActionInput,
   PullRequestActivity,
   PullRequestChangeBreakdown,
@@ -570,6 +574,7 @@ export const WS_METHODS = {
   pullRequestsActivity: "pullRequests.activity",
   pullRequestsReviewGuide: "pullRequests.reviewGuide",
   pullRequestsGenerateReviewGuide: "pullRequests.generateReviewGuide",
+  composerPredictNextMessage: "composer.predictNextMessage",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
   pullRequestsFilesViewed: "pullRequests.filesViewed",
@@ -1097,6 +1102,12 @@ const WsPullRequestsGenerateReviewGuideRpc = Rpc.make(WS_METHODS.pullRequestsGen
   payload: PullRequestRef,
   success: PullRequestReviewGuideResult,
   error: PullRequestRpcError,
+});
+
+const WsComposerPredictNextMessageRpc = Rpc.make(WS_METHODS.composerPredictNextMessage, {
+  payload: ComposerPredictNextMessageInput,
+  success: ComposerPredictNextMessageResult,
+  error: EnvironmentAuthorizationError,
 });
 
 const WsPullRequestsThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestsThreadComments, {
@@ -2116,6 +2127,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsActivityRpc,
   WsPullRequestsReviewGuideRpc,
   WsPullRequestsGenerateReviewGuideRpc,
+  WsComposerPredictNextMessageRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,
   WsPullRequestsFilesViewedRpc,

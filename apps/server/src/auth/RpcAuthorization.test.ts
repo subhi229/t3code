@@ -45,6 +45,12 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("keeps next-message predictions, which run a model on this environment, behind operate scope", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.composerPredictNextMessage)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("keeps triage, which seeds an agent that reads logs and the database, behind operate scope", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareTriage)).toBe(
       AuthOrchestrationOperateScope,
