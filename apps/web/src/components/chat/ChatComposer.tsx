@@ -192,7 +192,14 @@ import { useThreadContextDrop, threadContextDropTargetProps } from "./threadCont
 import { readThreadShell } from "~/state/entities";
 import { useLinkedEnvironments } from "~/state/peerLinks";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
-import type { ComposerContextRecord, ThreadPullRequestLink } from "@t3tools/contracts";
+import type { ComposerContextRecord, MessageId, ThreadPullRequestLink } from "@t3tools/contracts";
+import type { ThreadRunSummary } from "@t3tools/client-runtime/state/models";
+import {
+  nextMessagePredictionKey,
+  selectVisiblePrediction,
+} from "@t3tools/client-runtime/state/next-message-prediction";
+import { nextMessagePrediction } from "../../state/nextMessagePrediction";
+import { useEnvironmentQuery } from "../../state/query";
 import { threadContextAttachment } from "~/lib/threadContextAttachment";
 import {
   type ComposerCommandItem,
@@ -375,6 +382,8 @@ export interface ChatComposerProps {
   projectSelectionRequired: boolean;
 
   phase: SessionPhase;
+  latestRun: Pick<ThreadRunSummary, "status" | "assistantMessageId"> | null;
+  latestRunSettled: boolean;
   canInterrupt: boolean;
   isSendBusy: boolean;
   canResume: boolean;
@@ -532,6 +541,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
+    latestRun,
+    latestRunSettled,
     canInterrupt,
     isSendBusy,
     canResume,
@@ -1205,6 +1216,46 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+  const predictionKey = nextMessagePredictionKey({
+    enabled: settings.composerPredictionsEnabled,
+    threadId: routeKind === "draft" ? null : activeThreadId,
+    latestRun,
+    latestRunSettled,
+    phase,
+    hasPendingApproval: pendingApprovals.length > 0,
+    hasPendingUserInput: pendingUserInputs.length > 0,
+  });
+  const predictionQuery = useEnvironmentQuery(
+    predictionKey
+      ? nextMessagePrediction.prediction({ environmentId, input: predictionKey })
+      : null,
+  );
+  const [dismissedPredictionMessageId, setDismissedPredictionMessageId] =
+    useState<MessageId | null>(null);
+  // Predictions only stand in for the default placeholder, never for a prompt that asks for something.
+  const predictionAllowed =
+    !isComposerApprovalState &&
+    activePendingProgress === null &&
+    !(showPlanFollowUpPrompt && activeProposedPlan) &&
+    !projectSelectionRequired &&
+    !showProviderUnavailable;
+  const visiblePrediction = predictionAllowed
+    ? selectVisiblePrediction({
+        key: predictionKey,
+        result:
+          predictionKey && predictionQuery.data
+            ? { key: predictionKey, prediction: predictionQuery.data.prediction }
+            : null,
+        composerEmpty:
+          prompt.length === 0 &&
+          composerImages.length + composerFiles.length === 0 &&
+          composerDraft.persistedAttachments.length === 0 &&
+          composerTerminalContexts.length === 0 &&
+          composerPreviewAnnotations.length === 0 &&
+          composerReviewComments.length === 0,
+        dismissedAssistantMessageId: dismissedPredictionMessageId,
+      })
+    : null;
   const showComposerTopDrawer =
     pendingUserInputs.length > 0 ||
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
@@ -2345,6 +2396,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       readComposerSnapshot,
       applyPromptReplacement,
       submitComposer,
+      prediction: visiblePrediction,
+      dismissPrediction: () => {
+        if (predictionKey) setDismissedPredictionMessageId(predictionKey.assistantMessageId);
+      },
     })(key, event, isTaskItem);
 
   const {
@@ -3521,6 +3576,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onCitationSubmitAndSend={submitCitationAndSendStable}
                     onCitationDraftSave={saveCitationDraftToPromptStable}
                     onPaste={onComposerPasteStable}
+                    prediction={visiblePrediction}
                     placeholder={
                       isComposerApprovalState
                         ? activePendingApproval?.supportsFeedback

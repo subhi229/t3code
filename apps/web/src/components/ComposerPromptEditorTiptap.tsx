@@ -161,6 +161,8 @@ export interface ComposerPromptEditorProps {
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
+  /** Predicted next message, shown in place of the placeholder while the editor is empty. */
+  prediction?: string | null | undefined;
   ariaLabel?: string | undefined;
   suggestionListId?: string | undefined;
   activeSuggestionId?: string | undefined;
@@ -869,6 +871,7 @@ function ComposerPromptEditorTiptapInner(
     skills,
     disabled,
     placeholder,
+    prediction,
     ariaLabel,
     suggestionListId,
     activeSuggestionId,
@@ -1778,14 +1781,23 @@ function ComposerPromptEditorTiptapInner(
               onCopyCapture={(event) => handleCopyCut(event, false)}
               onCutCapture={(event) => handleCopyCut(event, true)}
             />
-            {isEmpty && contextRecords.size === 0 && placeholder ? (
+            {isEmpty && contextRecords.size === 0 && (prediction || placeholder) ? (
               <div
                 className={cn(
-                  "pointer-events-none absolute inset-0 leading-relaxed text-placeholder",
+                  "pointer-events-none absolute inset-0 overflow-hidden leading-relaxed text-placeholder",
                   placeholderClassName,
                 )}
               >
-                {placeholder}
+                {prediction ? (
+                  <>
+                    {prediction}
+                    <kbd className="ms-2 rounded border border-current px-1 font-sans text-2xs opacity-70">
+                      Tab
+                    </kbd>
+                  </>
+                ) : (
+                  placeholder
+                )}
               </div>
             ) : null}
           </div>

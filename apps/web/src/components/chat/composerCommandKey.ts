@@ -84,6 +84,9 @@ export function composerCommandKeyHandler(input: {
     dispatchMode: ComposerDispatchMode,
     submissionIntent: ComposerSubmissionIntent,
   ) => void;
+  /** The prediction currently shown in the empty composer, if any. */
+  readonly prediction: string | null;
+  readonly dismissPrediction: () => void;
 }) {
   const {
     keybindings,
@@ -121,6 +124,8 @@ export function composerCommandKeyHandler(input: {
     readComposerSnapshot,
     applyPromptReplacement,
     submitComposer,
+    prediction,
+    dismissPrediction,
   } = input;
 
   // The composer persists across threads. A recall from thread A must not
@@ -218,7 +223,12 @@ export function composerCommandKeyHandler(input: {
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
     if (key === "Escape") {
-      if (!menuIsActive || event.isComposing || event.keyCode === 229) return false;
+      if (event.isComposing || event.keyCode === 229) return false;
+      if (!menuIsActive) {
+        if (prediction === null) return false;
+        dismissPrediction();
+        return true;
+      }
       dismissComposerTrigger(trigger);
       composerMenuOpenRef.current = false;
       return true;
@@ -253,6 +263,19 @@ export function composerCommandKeyHandler(input: {
         }),
         submissionIntent,
       );
+      return true;
+    }
+    if (
+      key === "Tab" &&
+      prediction !== null &&
+      promptRef.current.length === 0 &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.isComposing
+    ) {
+      replacePromptFromHistory(prediction);
       return true;
     }
     if (key === "Enter" && isTaskItem) return false;

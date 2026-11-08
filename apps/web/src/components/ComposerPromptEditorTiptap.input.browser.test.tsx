@@ -791,3 +791,58 @@ describe("an Arabic line", () => {
     );
   });
 });
+
+function PredictionComposer({ prediction }: { prediction: string | null }) {
+  const [prompt, setPrompt] = useState({ value: "", cursor: 0 });
+  return (
+    <ComposerPromptEditor
+      editorRef={createRef<ComposerPromptEditorHandle>()}
+      value={prompt.value}
+      cursor={prompt.cursor}
+      contextRecords={new Map()}
+      skills={[]}
+      disabled={false}
+      placeholder="Ask anything"
+      prediction={prediction}
+      onChange={(value, cursor) => setPrompt({ value, cursor })}
+      onPaste={() => {}}
+    />
+  );
+}
+
+describe("composer prediction", () => {
+  it("shows the prediction instead of the placeholder in an empty composer", async () => {
+    await using screen = await render(<PredictionComposer prediction="Run the tests" />);
+
+    await expect.element(screen.getByText("Run the tests", { exact: false })).toBeVisible();
+    expect(screen.container.textContent).not.toContain("Ask anything");
+  });
+
+  it("hides the prediction once text is typed", async () => {
+    await using screen = await render(<PredictionComposer prediction="Run the tests" />);
+    const editor = editorIn(screen.container);
+    await act(async () => {
+      editor.commands.focus("end");
+    });
+    await vi.waitFor(() => expect(document.activeElement).toBe(editor.view.dom));
+    await userEvent.keyboard("a");
+
+    await vi.waitFor(() => expect(serializeEditorDoc(editor.state.doc).value).toBe("a"));
+    expect(screen.container.textContent).not.toContain("Run the tests");
+  });
+
+  it("does not touch typed text when a prediction arrives", async () => {
+    await using screen = await render(<PredictionComposer prediction={null} />);
+    const editor = editorIn(screen.container);
+    await act(async () => {
+      editor.commands.focus("end");
+    });
+    await vi.waitFor(() => expect(document.activeElement).toBe(editor.view.dom));
+    await userEvent.keyboard("hi");
+    await vi.waitFor(() => expect(serializeEditorDoc(editor.state.doc).value).toBe("hi"));
+    await screen.rerender(<PredictionComposer prediction="Run the tests" />);
+
+    expect(serializeEditorDoc(editorIn(screen.container).state.doc).value).toBe("hi");
+    expect(screen.container.textContent).not.toContain("Run the tests");
+  });
+});
