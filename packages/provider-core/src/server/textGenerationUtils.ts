@@ -89,13 +89,13 @@ export const MAX_NEXT_MESSAGE_PREDICTION_CHARS = 280;
 
 export function sanitizeNextMessagePrediction(raw: string | null): string | null {
   if (raw === null) return null;
-  const normalized = raw
+  const unlabeled = raw
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/^['"`]+|['"`]+$/g, "")
-    .trim()
-    .replace(/^(?:user|prediction|next message)\s*:\s*/i, "")
-    .trim();
+    .replace(/^(?:user|prediction|next message)\s*:\s*/i, "");
+  // Only a matching pair wraps the message; a lone closing quote or backtick belongs to the text.
+  const wrapped = /^(['"`])((?:(?!\1).)*)\1$/.exec(unlabeled);
+  const normalized = (wrapped ? wrapped[2]! : unlabeled).trim();
   if (normalized.length === 0) return null;
   if (normalized.length <= MAX_NEXT_MESSAGE_PREDICTION_CHARS) return normalized;
   const window = normalized.slice(0, MAX_NEXT_MESSAGE_PREDICTION_CHARS + 1);

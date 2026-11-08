@@ -51,6 +51,10 @@ describe("sanitizeNextMessagePrediction", () => {
     ["next message: commit this", "commit this"],
     ["line one\nline two", "line one line two"],
     ["`ship it`", "ship it"],
+    ["Run the tests in `src/auth.ts`", "Run the tests in `src/auth.ts`"],
+    ['Rename the label to "Show predictions"', 'Rename the label to "Show predictions"'],
+    ['User: "commit this"', "commit this"],
+    ['"yes" for staging, then "no"', '"yes" for staging, then "no"'],
   ])("sanitizeNextMessagePrediction(%j) -> %j", (raw, expected) => {
     expect(sanitizeNextMessagePrediction(raw)).toBe(expected);
   });

@@ -1,9 +1,18 @@
-import type { MessageId, RunId, ThreadId } from "@t3tools/contracts";
+import type {
+  MessageId,
+  OrchestrationV2PlanArtifact,
+  OrchestrationV2TurnItem,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
+import { latestExecutedRun } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -35,6 +44,7 @@ class NotLatestReply extends Schema.TaggedError<NotLatestReply>()("NotLatestRepl
 
 const KEY_SEPARATOR = "\u0000";
 const NO_PREDICTION: NextMessagePredictionResult = { prediction: null };
+const RECENT_RUNS = 8;
 const TOOL_TURN_ITEM_TYPES = [
   "command_execution",
   "file_change",
@@ -43,119 +53,139 @@ const TOOL_TURN_ITEM_TYPES = [
   "dynamic_tool",
   "subagent",
 ] as const;
+const PLAN_TURN_ITEM_TYPES = ["todo_list", "proposed_plan"] as const;
+
+function activityLabel(item: OrchestrationV2TurnItem): string {
+  const detail =
+    item.type === "file_change"
+      ? item.fileName
+      : item.type === "command_execution"
+        ? item.input.split("\n")[0]
+        : item.type === "file_search"
+          ? item.pattern
+          : item.type === "web_search"
+            ? item.patterns?.join(", ")
+            : item.type === "dynamic_tool"
+              ? item.toolName
+              : undefined;
+  return item.title ?? detail ?? item.type;
+}
 
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const fileSystem = yield* FileSystem.FileSystem;
+  // One empty directory for the service's lifetime keeps project instructions out of every
+  // request without registering a new directory with providers on each prediction.
+  const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-prediction-" });
 
   const generate = Effect.fn("NextMessagePredictionService.generate")(function* (
     input: NextMessagePredictionInput,
   ) {
-    const records = yield* threads.getThreadRecords(input.threadId, ["messages", "runs", "plans"], {
+    const structure = yield* threads.getThreadRecords(input.threadId, ["runs", "plans"]);
+    const runs = structure.runs.filter((run) => run.status !== "rolled_back");
+    const latestRun = latestExecutedRun(runs);
+    // Not ready yet or superseded: report it uncached so a later request can still predict.
+    if (latestRun?.status !== "completed") return yield* new NotLatestReply();
+
+    const ordinals = new Map(runs.map((run) => [run.id, run.ordinal]));
+    const recentRunIds = runs
+      .filter((run) => run.status !== "queued" && run.startedAt !== null)
+      .toSorted((left, right) => right.ordinal - left.ordinal)
+      .slice(0, RECENT_RUNS)
+      .map((run) => run.id);
+    const ordinalOf = (runId: RunId | null) => (runId === null ? -1 : (ordinals.get(runId) ?? -1));
+    const messages = (yield* threads.getThreadRecords(input.threadId, ["messages"], {
       messageRoles: ["user", "assistant"],
-    });
-    const runs = new Map(
-      records.runs.filter((run) => run.status !== "rolled_back").map((run) => [run.id, run]),
-    );
-    const ordinalOf = (runId: RunId | null) =>
-      runId === null ? -1 : (runs.get(runId)?.ordinal ?? -1);
-    const messages = records.messages
-      .filter((message) => message.runId === null || runs.has(message.runId))
-      .toSorted(
-        (left, right) =>
-          ordinalOf(left.runId) - ordinalOf(right.runId) ||
-          DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt) ||
-          Number(left.role === "assistant") - Number(right.role === "assistant"),
-      );
-    const latestRun = [...runs.values()].reduce<(typeof records.runs)[number] | undefined>(
-      (latest, run) => (latest === undefined || run.ordinal > latest.ordinal ? run : latest),
-      undefined,
+      messageRunIds: recentRunIds,
+    })).messages.toSorted(
+      (left, right) =>
+        ordinalOf(left.runId) - ordinalOf(right.runId) ||
+        DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt) ||
+        Number(left.role === "assistant") - Number(right.role === "assistant"),
     );
     const latest = messages.findLast(
-      (message) => message.role === "assistant" && message.runId === latestRun?.id,
+      (message) => message.role === "assistant" && message.runId === latestRun.id,
     );
-    // Not ready yet or superseded: report it uncached so a later request can still predict.
-    if (
-      latestRun?.status !== "completed" ||
-      latest === undefined ||
-      latest.id !== input.assistantMessageId ||
-      latest.streaming
-    ) {
+    if (latest === undefined || latest.id !== input.assistantMessageId || latest.streaming) {
       return yield* new NotLatestReply();
     }
 
-    let todoList: (typeof records.plans)[number] | undefined;
-    let todoOrdinal = -1;
-    for (const plan of records.plans) {
-      const ordinal = plan.runId === null ? undefined : runs.get(plan.runId)?.ordinal;
-      if (
-        plan.kind === "todo_list" &&
-        plan.status !== "superseded" &&
-        ordinal !== undefined &&
-        ordinal >= todoOrdinal
-      ) {
-        todoList = plan;
-        todoOrdinal = ordinal;
+    // The newest plan of a kind lives in the latest run that has one; plan ids cannot order
+    // replacements within a run, so the run's turn items decide.
+    const latestPlan = Effect.fn("NextMessagePredictionService.latestPlan")(function* <
+      K extends OrchestrationV2PlanArtifact["kind"],
+    >(kind: K) {
+      const candidates = structure.plans.filter(
+        (plan): plan is Extract<OrchestrationV2PlanArtifact, { kind: K }> =>
+          plan.kind === kind && plan.status !== "superseded" && ordinalOf(plan.runId) >= 0,
+      );
+      const newestOrdinal = Math.max(-1, ...candidates.map((plan) => ordinalOf(plan.runId)));
+      const inRun = candidates.filter((plan) => ordinalOf(plan.runId) === newestOrdinal);
+      if (inRun.length <= 1) return inRun[0] ?? null;
+      const items = (yield* threads.getThreadRecords(input.threadId, ["turnItems"], {
+        turnItemRunIds: [inRun[0]!.runId!],
+        turnItemTypes: [...PLAN_TURN_ITEM_TYPES],
+      })).turnItems.toSorted((left, right) => right.ordinal - left.ordinal);
+      for (const item of items) {
+        if (item.type !== kind || !("planId" in item)) continue;
+        const match = inRun.find((plan) => plan.id === item.planId);
+        if (match) return match;
       }
-    }
-    const turnItems =
-      latest.runId === null
-        ? []
-        : (yield* threads.getThreadRecords(input.threadId, ["turnItems"], {
-            turnItemRunIds: [latest.runId],
-            turnItemTypes: [...TOOL_TURN_ITEM_TYPES],
-          })).turnItems
-            .toSorted((left, right) => left.ordinal - right.ordinal)
-            .map((item) => ({
-              type: item.type,
-              status: item.status,
-              title: item.title ?? item.type,
-            }));
+      return inRun.at(-1) ?? null;
+    });
+    const todoList = yield* latestPlan("todo_list");
+    const proposedPlan = todoList === null ? yield* latestPlan("proposed_plan") : null;
+    const turnItems = (yield* threads.getThreadRecords(input.threadId, ["turnItems"], {
+      turnItemRunIds: [latestRun.id],
+      turnItemTypes: [...TOOL_TURN_ITEM_TYPES],
+    })).turnItems
+      .toSorted((left, right) => left.ordinal - right.ordinal)
+      .map((item) => ({ type: item.type, status: item.status, title: activityLabel(item) }));
 
     const context = formatPredictionContext({
       messages,
-      todoList: todoList?.kind === "todo_list" ? todoList : null,
+      todoList,
+      proposedPlan: proposedPlan?.markdown ?? null,
       turnItems,
     });
     const settings = resolveProjectSettings(
       yield* serverSettings.getSettings,
-      records.thread.projectId,
+      structure.thread.projectId,
     ).settings;
-    // An empty directory keeps project instructions and tools out of a plain text request.
-    return yield* Effect.scoped(
-      Effect.gen(function* () {
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-prediction-" });
-        return yield* textGeneration.generateNextMessagePrediction({
-          cwd,
-          context,
-          modelSelection: settings.textGenerationModelSelection,
-        });
-      }),
-    );
+    return yield* textGeneration.generateNextMessagePrediction({
+      cwd,
+      context,
+      modelSelection: settings.textGenerationModelSelection,
+    });
   });
 
-  const cache = yield* Cache.make({
-    capacity: 256,
-    timeToLive: "6 hours",
-    lookup: (key: string) => {
+  const cache = yield* Cache.makeWith(
+    (key: string) => {
       const [threadId, assistantMessageId] = key.split(KEY_SEPARATOR) as [ThreadId, MessageId];
       return generate({ threadId, assistantMessageId });
     },
-  });
+    {
+      capacity: 256,
+      // Failures expire at once so the next request retries instead of reusing them.
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.hours(6) : Duration.zero),
+    },
+  );
+
+  const unavailable = (reason: unknown) =>
+    Effect.logDebug("next-message prediction unavailable", reason).pipe(Effect.as(NO_PREDICTION));
 
   const predict: NextMessagePredictionService["Service"]["predict"] = Effect.fn(
     "NextMessagePredictionService.predict",
   )(function* (input) {
-    const key = `${input.threadId}${KEY_SEPARATOR}${input.assistantMessageId}`;
-    return yield* Cache.get(cache, key).pipe(
-      Effect.catchCause((cause) =>
-        Cache.invalidate(cache, key).pipe(
-          Effect.andThen(Effect.logDebug("next-message prediction unavailable", cause)),
-          Effect.as(NO_PREDICTION),
-        ),
-      ),
+    return yield* Cache.get(
+      cache,
+      `${input.threadId}${KEY_SEPARATOR}${input.assistantMessageId}`,
+    ).pipe(
+      // Interruption passes through: an abandoned request must not end a shared lookup.
+      Effect.catch((error) => unavailable(error)),
+      Effect.catchDefect((defect) => unavailable(defect)),
     );
   });
 

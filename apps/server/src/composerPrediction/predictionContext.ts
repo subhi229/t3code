@@ -5,6 +5,8 @@ const MAX_MESSAGE_CHARS = 1_500;
 const MAX_LATEST_ASSISTANT_CHARS = 6_000;
 const MAX_TODO_STEPS = 20;
 const MAX_TURN_ITEMS = 15;
+const MAX_TURN_ITEM_LABEL_CHARS = 160;
+const MAX_PROPOSED_PLAN_CHARS = 2_000;
 
 export type PredictionContextMessage = Pick<
   OrchestrationV2ConversationMessage,
@@ -19,6 +21,7 @@ export interface PredictionContextInput {
       readonly status: "pending" | "running" | "completed";
     }>;
   } | null;
+  readonly proposedPlan: string | null;
   readonly turnItems: ReadonlyArray<{
     readonly type: string;
     readonly status: string;
@@ -53,19 +56,36 @@ export function formatPredictionContext(input: PredictionContextInput): string {
       )
       .join("\n\n"),
   ];
-  const steps = input.todoList?.steps.slice(0, MAX_TODO_STEPS) ?? [];
-  if (steps.length > 0) {
+  const allSteps = input.todoList?.steps ?? [];
+  // A long list keeps its open steps: they are what is left to do.
+  const steps =
+    allSteps.length <= MAX_TODO_STEPS
+      ? allSteps
+      : allSteps.filter((step) => step.status !== "completed").slice(0, MAX_TODO_STEPS);
+  const hiddenCompleted = allSteps.filter(
+    (step) => step.status === "completed" && !steps.includes(step),
+  ).length;
+  if (allSteps.length > 0) {
     sections.push(
-      `Todo list:\n${steps
-        .map((step) => `${step.status === "completed" ? "[x]" : "[ ]"} ${step.text}`)
-        .join("\n")}`,
+      `Todo list:\n${[
+        ...(hiddenCompleted > 0 ? [`(${hiddenCompleted} completed steps not shown)`] : []),
+        ...steps.map((step) => `${step.status === "completed" ? "[x]" : "[ ]"} ${step.text}`),
+      ].join("\n")}`,
+    );
+  }
+  if (input.proposedPlan !== null && input.proposedPlan.trim().length > 0) {
+    sections.push(
+      `Proposed plan:\n${keepTail(input.proposedPlan.trim(), MAX_PROPOSED_PLAN_CHARS)}`,
     );
   }
   const items = input.turnItems.slice(-MAX_TURN_ITEMS);
   if (items.length > 0) {
     sections.push(
       `Agent activity in its last turn:\n${items
-        .map((item) => `- ${item.type} (${item.status}): ${item.title}`)
+        .map(
+          (item) =>
+            `- ${item.type} (${item.status}): ${item.title.slice(0, MAX_TURN_ITEM_LABEL_CHARS)}`,
+        )
         .join("\n")}`,
     );
   }
