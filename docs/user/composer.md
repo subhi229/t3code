@@ -156,6 +156,18 @@ the text is an unedited recalled prompt, with the caret on the first visual line
 the last visual line for `ArrowDown`, counting wrapped lines. Editing a recalled prompt turns it
 into a normal draft.
 
+## Predictions
+
+When the agent finishes a reply, the empty composer shows a guess at your next message in grey: the
+step the agent said comes next, an answer to its question, or the check worth running before you
+move on. Press `Tab` to put it in the composer, where you can edit it before sending. Press
+`Escape` to hide it until the next reply. Typing anything hides it too, and clearing the composer
+brings it back. When nothing is left to do, no prediction appears.
+
+Each prediction is a short request to your text generation model, so it uses a little of that
+model's usage. Turn predictions off per device in **Settings → Chat → Show predictions**.
+Predictions are on desktop and web for now.
+
 ## Edit an earlier prompt
 
 On web and desktop, choose **Edit from here** beneath a sent message to rewind
