@@ -57,7 +57,11 @@ describe("resolveProjectSettings", () => {
       defaultAutoPull: true,
       sidebarAutoSettleAfterDays: 3,
       projectSettingsOverrides: {
-        [projectId]: { defaultAutoPull: false, sidebarAutoSettleAfterDays: null },
+        [projectId]: {
+          defaultAutoPull: false,
+          sidebarAutoSettleAfterDays: null,
+          promptSuggestionBehavior: "security",
+        },
       },
     });
     const resolved = resolveProjectSettings(settings, projectId);
@@ -67,7 +71,11 @@ describe("resolveProjectSettings", () => {
     expect(resolved.sources.defaultAutoPull).toBe("project");
     expect(resolved.sources.sidebarAutoSettleAfterDays).toBe("project");
     expect(resolved.sources.defaultThreadEnvMode).toBe("environment");
+    expect(resolved.settings.promptSuggestionBehavior).toBe("security");
     expect(resolveProjectSettings(settings, otherProjectId).settings.defaultAutoPull).toBe(true);
+    expect(resolveProjectSettings(settings, otherProjectId).settings.promptSuggestionBehavior).toBe(
+      "stay-on-track",
+    );
   });
 
   it("honours the aggregate's own fields only until the server has folded them", () => {

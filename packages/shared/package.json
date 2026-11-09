@@ -151,6 +151,10 @@
       "types": "./src/serverSettings.ts",
       "import": "./src/serverSettings.ts"
     },
+    "./promptSuggestionBehaviors": {
+      "types": "./src/promptSuggestionBehaviors.ts",
+      "import": "./src/promptSuggestionBehaviors.ts"
+    },
     "./backgroundActivitySettings": {
       "types": "./src/backgroundActivitySettings.ts",
       "import": "./src/backgroundActivitySettings.ts"
