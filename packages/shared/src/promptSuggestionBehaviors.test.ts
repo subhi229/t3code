@@ -17,8 +17,8 @@ describe("resolvePromptSuggestionBehavior", () => {
       resolvePromptSuggestionBehavior({
         promptSuggestionBehavior: "security",
         promptSuggestionCustomBehaviors: [],
-      }).name,
-    ).toBe("Security check");
+      }),
+    ).toBe(PROMPT_SUGGESTION_PRESETS.find((preset) => preset.id === "security"));
   });
 
   it("resolves a custom behavior by id", () => {
@@ -27,7 +27,7 @@ describe("resolvePromptSuggestionBehavior", () => {
         promptSuggestionBehavior: "custom-1",
         promptSuggestionCustomBehaviors: [custom],
       }),
-    ).toMatchObject({ id: "custom-1", name: "Mine", instructions: "Suggest docs updates." });
+    ).toEqual({ id: "custom-1", instructions: "Suggest docs updates." });
   });
 
   it("falls back to stay-on-track for an unknown id", () => {
