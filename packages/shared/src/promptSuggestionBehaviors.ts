@@ -1,4 +1,4 @@
-import type { ModelSelection, ServerSettings } from "@t3tools/contracts";
+import type { ServerSettings } from "@t3tools/contracts";
 
 export interface PromptSuggestionBehavior {
   readonly id: string;
@@ -61,10 +61,4 @@ export function resolvePromptSuggestionBehavior(
   const custom = settings.promptSuggestionCustomBehaviors.find((behavior) => behavior.id === id);
   if (custom) return { id: custom.id, instructions: custom.instructions };
   return PROMPT_SUGGESTION_PRESETS[0];
-}
-
-export function resolvePromptSuggestionModelSelection(
-  settings: Pick<ServerSettings, "promptSuggestionModelSelection" | "textGenerationModelSelection">,
-): ModelSelection {
-  return settings.promptSuggestionModelSelection ?? settings.textGenerationModelSelection;
 }

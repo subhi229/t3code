@@ -1,12 +1,10 @@
-import { DEFAULT_SERVER_SETTINGS, ProviderInstanceId } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createModelSelection } from "./model.ts";
 import {
   DEFAULT_PROMPT_SUGGESTION_BEHAVIOR_ID,
   PROMPT_SUGGESTION_PRESETS,
   resolvePromptSuggestionBehavior,
-  resolvePromptSuggestionModelSelection,
 } from "./promptSuggestionBehaviors.ts";
 
 const custom = { id: "custom-1", name: "Mine", instructions: "Suggest docs updates." };
@@ -56,26 +54,5 @@ describe("resolvePromptSuggestionBehavior", () => {
     expect(DEFAULT_SERVER_SETTINGS.promptSuggestionBehavior).toBe(
       DEFAULT_PROMPT_SUGGESTION_BEHAVIOR_ID,
     );
-  });
-});
-
-describe("resolvePromptSuggestionModelSelection", () => {
-  it("model selection follows the text generation model when null", () => {
-    expect(
-      resolvePromptSuggestionModelSelection({
-        ...DEFAULT_SERVER_SETTINGS,
-        promptSuggestionModelSelection: null,
-      }),
-    ).toEqual(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
-  });
-
-  it("uses its own model selection when set", () => {
-    const own = createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-haiku-5-5");
-    expect(
-      resolvePromptSuggestionModelSelection({
-        ...DEFAULT_SERVER_SETTINGS,
-        promptSuggestionModelSelection: own,
-      }),
-    ).toEqual(own);
   });
 });
