@@ -23,6 +23,15 @@
   </a>
 </p>
 
+> [!NOTE]
+> **This fork branch adds "My model" prompt suggestions.** T3 Code's Labs setting [Suggest next prompt](https://github.com/pingdotgg/t3code/pull/28047) uses Claude's and Codex's built-in prediction. This branch lets you steer that suggestion yourself, with any text generation provider:
+>
+> - **Model and effort:** pick the model that writes suggestions, or follow the text generation model.
+> - **Behavior:** choose what suggestions focus on. Presets: Stay on track, Show me the next step, Head off future problems, Verify before moving on, Tests first, Security check, Help me understand, Ship small. Or write your own; a project can use its own behavior.
+> - **Speed:** Settings shows how long recent suggestions took with the current model.
+>
+> Try it: Settings > Labs > Suggest next prompt, then set **Source** to **My model**. Suggestions only run for threads you have open, and each one is an extra request on that provider's usage. Details are in [Suggested next prompt](./docs/user/composer.md#suggested-next-prompt); [evals/next-message](./evals/next-message/README.md) compares behavior prompts with the built-in wording. This is a proposal, not part of upstream T3 Code yet: see [discussion #6839](https://github.com/pingdotgg/t3code/discussions/6839).
+
 T3 Code runs the coding agents on your machine and gives them one fast interface. Start a thread at your desk, then approve the next step from your phone.
 
 It works with Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code, fx, and any [ACP](./docs/user/providers-acp.md) agent. If an agent is set up on your computer, T3 Code can control it.
