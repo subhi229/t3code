@@ -168,6 +168,14 @@ thread and near usage limits. Codex needs version 0.165 or later; if T3 Code man
 Codex, update it in Settings > Providers. Codex follows a change to the setting at once; open Claude
 threads follow it after they restart. Suggestions show on web and desktop.
 
+To steer suggestions yourself, set **Source** to **My model**. Pick any text generation model and
+its effort, then choose a **Behavior**, such as Stay on track, Show me the next step, Head off
+future problems, or Security check, or add your own instructions. A project can use its own
+behavior. Settings shows how long recent suggestions took; smaller models and low effort are
+fastest, and a suggestion that arrives after you start typing is skipped. Your recent conversation
+is sent to the suggestion model's provider, and each suggestion is an extra request on that
+provider's usage. My model only generates for threads you have open.
+
 ## Edit an earlier prompt
 
 On web and desktop, choose **Edit from here** beneath a sent message to rewind
