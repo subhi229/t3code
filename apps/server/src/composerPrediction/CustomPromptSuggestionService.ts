@@ -1,5 +1,6 @@
 import {
   isDelegatedAppThread,
+  type ModelSelection,
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2PromptSuggestion,
   type OrchestrationV2TurnItem,
@@ -40,7 +41,7 @@ export class CustomPromptSuggestionService extends Context.Service<
   {
     /** The thread's suggestion stream; while subscribed, the thread counts as watched. */
     readonly subscribe: (threadId: ThreadId) => Stream.Stream<OrchestrationV2PromptSuggestion>;
-    /** Median duration of recent successful generations. */
+    /** Median duration of recent successful generations with the current suggestion model. */
     readonly speed: Stream.Stream<PromptSuggestionSpeedSample>;
     /** Generates and publishes for a completed run when the thread qualifies. */
     readonly onRunCompleted: (threadId: ThreadId, runId: RunId) => Effect.Effect<void>;
@@ -79,6 +80,12 @@ function activityLabel(item: OrchestrationV2TurnItem): string {
   return item.title ?? detail ?? item.type;
 }
 
+/** Speed is shown per model, so each sample remembers which model and options produced it. */
+function modelKey(selection: ModelSelection): string {
+  const options = (selection.options ?? []).map((option) => `${option.id}=${option.value}`);
+  return [selection.instanceId, selection.model, ...options].join(" ");
+}
+
 export function median(values: ReadonlyArray<number>): number | null {
   if (values.length === 0) return null;
   const sorted = values.toSorted((left, right) => left - right);
@@ -96,7 +103,9 @@ const make = Effect.gen(function* () {
   // request without registering a new directory with providers on each suggestion.
   const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-suggestion-" });
   const watched = yield* Ref.make<ReadonlyMap<ThreadId, number>>(new Map());
-  const durations = yield* SubscriptionRef.make<ReadonlyArray<number>>([]);
+  const durations = yield* SubscriptionRef.make<
+    ReadonlyArray<{ readonly model: string; readonly ms: number }>
+  >([]);
   const fibers = yield* FiberMap.make<ThreadId>();
   // The run each thread last generated for, so a re-announced run or a reopened thread costs nothing.
   const claimed = yield* Ref.make<ReadonlyMap<ThreadId, RunId>>(new Map());
@@ -122,6 +131,13 @@ const make = Effect.gen(function* () {
       }
       return [true, next] as const;
     });
+  const release = (threadId: ThreadId, runId: RunId) =>
+    Ref.update(claimed, (current) => {
+      if (current.get(threadId) !== runId) return current;
+      const next = new Map(current);
+      next.delete(threadId);
+      return next;
+    });
   const latestCompletedRunId = Effect.fn("CustomPromptSuggestionService.latestCompletedRunId")(
     function* (threadId: ThreadId) {
       const structure = yield* threads.getThreadRecords(threadId, ["runs"]);
@@ -143,8 +159,8 @@ const make = Effect.gen(function* () {
       return next;
     });
 
-  /** The suggestion text for the run, or null when the run or thread does not qualify. */
-  const generate = Effect.fn("CustomPromptSuggestionService.generate")(function* (
+  /** The prediction request for the run, or null when the run or thread does not qualify. */
+  const prepare = Effect.fn("CustomPromptSuggestionService.prepare")(function* (
     threadId: ThreadId,
     runId: RunId,
   ) {
@@ -163,6 +179,8 @@ const make = Effect.gen(function* () {
     const runs = structure.runs.filter((run) => run.status !== "rolled_back");
     const latestRun = latestExecutedRun(runs);
     if (latestRun?.id !== runId || latestRun.status !== "completed") return null;
+    // The user already sent the next message; it starts as soon as this run settles.
+    if (runs.some((run) => run.status === "queued" && run.queueHeld !== true)) return null;
 
     // Held queues can run out of ordinal order, so recency follows when each run ran.
     const executed = runs
@@ -225,8 +243,7 @@ const make = Effect.gen(function* () {
       .toSorted((left, right) => left.ordinal - right.ordinal)
       .map((item) => ({ type: item.type, status: item.status, title: activityLabel(item) }));
 
-    const startedAt = yield* Clock.currentTimeMillis;
-    const result = yield* textGeneration.generateNextMessagePrediction({
+    return {
       cwd,
       context: formatPredictionContext({
         messages,
@@ -240,10 +257,20 @@ const make = Effect.gen(function* () {
         undefined,
         structure.thread.projectId,
       ),
-    });
-    const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt;
+    };
+  });
+
+  const predict = Effect.fn("CustomPromptSuggestionService.predict")(function* (
+    input: TextGeneration.NextMessagePredictionInput,
+  ) {
+    const startedAt = yield* Clock.currentTimeMillis;
+    const result = yield* textGeneration.generateNextMessagePrediction(input);
+    const sample = {
+      model: modelKey(input.modelSelection),
+      ms: (yield* Clock.currentTimeMillis) - startedAt,
+    };
     yield* SubscriptionRef.update(durations, (current) =>
-      [...current, elapsedMs].slice(-SPEED_SAMPLES),
+      [...current, sample].slice(-SPEED_SAMPLES),
     );
     return result.prediction;
   });
@@ -252,30 +279,38 @@ const make = Effect.gen(function* () {
     "CustomPromptSuggestionService.onRunCompleted",
   )(function* (threadId, runId) {
     if (!(yield* isWatched(threadId)) || !(yield* modelSourceOn)) return;
-    if (!(yield* claim(threadId, runId))) return;
-    const text = yield* generate(threadId, runId).pipe(
-      // Interruption passes through: a newer run replaced this one.
+    const request = yield* prepare(threadId, runId).pipe(
+      Effect.catch((cause) => unavailable(cause)),
+      Effect.catchDefect((cause) => unavailable(cause)),
+    );
+    if (request === null || !(yield* claim(threadId, runId))) return;
+    const text = yield* predict(request).pipe(
+      // A newer run replaced this one; an unanswered request leaves the run free to retry.
+      Effect.onInterrupt(() => release(threadId, runId)),
       Effect.catch((cause) => unavailable(cause)),
       Effect.catchDefect((cause) => unavailable(cause)),
     );
     if (text === null) return;
-    // The source or the thread can change while a slow model answers.
+    // The source or the thread can change while a slow model answers; settings are read last.
     const stillCurrent =
-      (yield* modelSourceOn) &&
-      (yield* latestCompletedRunId(threadId).pipe(Effect.orElseSucceed(() => null))) === runId;
+      (yield* latestCompletedRunId(threadId).pipe(Effect.orElseSucceed(() => null))) === runId &&
+      (yield* modelSourceOn);
     if (stillCurrent) yield* sessions.publishPromptSuggestion(threadId, { runId, text });
   });
 
   const unavailable = (cause: unknown) =>
     Effect.logDebug("custom prompt suggestion unavailable", { cause }).pipe(Effect.as(null));
 
-  // A run can be announced as completed again; keep its generation instead of restarting it.
-  const trigger: CustomPromptSuggestionService["Service"]["trigger"] = (threadId, runId) =>
-    Effect.flatMap(isClaimed(threadId, runId), (same) =>
-      same
-        ? Effect.void
-        : FiberMap.run(fibers, threadId, onRunCompleted(threadId, runId)).pipe(Effect.asVoid),
-    );
+  // Runs are announced as completed again (checkpoints, for one); only the latest replaces work.
+  const trigger: CustomPromptSuggestionService["Service"]["trigger"] = Effect.fn(
+    "CustomPromptSuggestionService.trigger",
+  )(function* (threadId, runId) {
+    if (!(yield* isWatched(threadId)) || !(yield* modelSourceOn)) return;
+    if (yield* isClaimed(threadId, runId)) return;
+    const latest = yield* latestCompletedRunId(threadId).pipe(Effect.orElseSucceed(() => null));
+    if (latest !== runId) return;
+    yield* FiberMap.run(fibers, threadId, onRunCompleted(threadId, runId));
+  });
 
   /** Reopening a thread: generate for its latest completed run unless one is already shown. */
   const ensureLatest = Effect.fn("CustomPromptSuggestionService.ensureLatest")(function* (
@@ -303,8 +338,22 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const speed = SubscriptionRef.changes(durations).pipe(
-    Stream.map((values) => ({ medianMs: median(values), samples: values.length })),
+  const currentModel = serverSettings.getSettings.pipe(
+    Effect.map((settings) =>
+      modelKey(resolvePromptSuggestionModelSelection(settings, undefined, null)),
+    ),
+    Effect.orElseSucceed(() => null),
+  );
+  const speed = Stream.merge(SubscriptionRef.changes(durations), serverSettings.streamChanges).pipe(
+    Stream.mapEffect(() =>
+      Effect.gen(function* () {
+        const model = yield* currentModel;
+        const values = (yield* SubscriptionRef.get(durations))
+          .filter((sample) => sample.model === model)
+          .map((sample) => sample.ms);
+        return { medianMs: median(values), samples: values.length };
+      }),
+    ),
   );
 
   const start = forkParked(

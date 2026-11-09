@@ -181,11 +181,7 @@ function ModelRow() {
             onCheckedChange={(checked) =>
               updateSettings({
                 promptSuggestionModelSelection: checked
-                  ? createModelSelection(
-                      settings.textGenerationModelSelection.instanceId,
-                      settings.textGenerationModelSelection.model,
-                      settings.textGenerationModelSelection.options,
-                    )
+                  ? createModelSelection(selection.instanceId, selection.model, selection.options)
                   : null,
               })
             }
@@ -286,7 +282,8 @@ function CustomBehaviorsRow() {
                   maxLength={40}
                   onBlur={(event) => {
                     const name = event.target.value.trim();
-                    if (name && name !== behavior.name) update(behavior.id, { name });
+                    if (!name) event.target.value = behavior.name;
+                    else if (name !== behavior.name) update(behavior.id, { name });
                   }}
                 />
                 <Button
