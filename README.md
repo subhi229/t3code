@@ -1,5 +1,14 @@
 # T3 Code
 
+> [!NOTE]
+> **This fork branch adds "My model" prompt suggestions.** T3 Code's Labs setting [Suggest next prompt](https://github.com/pingdotgg/t3code/pull/28047) uses Claude's and Codex's built-in prediction. This branch lets you steer that suggestion yourself, with any text generation provider:
+>
+> - **Model and effort:** pick the model that writes suggestions, or follow the text generation model.
+> - **Behavior:** choose what suggestions focus on. Presets: Stay on track, Show me the next step, Head off future problems, Verify before moving on, Tests first, Security check, Help me understand, Ship small. Or write your own; a project can use its own behavior.
+> - **Speed:** Settings shows how long recent suggestions took with the current model.
+>
+> Try it: Settings > Labs > Suggest next prompt, then set **Source** to **My model**. Suggestions only run for threads you have open, and each one is an extra request on that provider's usage. Details are in [Suggested next prompt](./docs/user/composer.md#suggested-next-prompt); [evals/next-message](./evals/next-message/README.md) compares behavior prompts with the built-in wording. This is a proposal, not part of upstream T3 Code yet: see [discussion #6839](https://github.com/pingdotgg/t3code/discussions/6839).
+
 T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, and fx. If they're set up on your computer, T3 Code can control them.
