@@ -29,11 +29,13 @@ import {
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildNextMessagePredictionPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "@t3tools/provider-core/server/textGenerationPrompts";
 import {
   sanitizeCommitSubject,
+  sanitizeNextMessagePrediction,
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
@@ -361,6 +363,18 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     });
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
+  const generateNextMessagePrediction: ProviderTextGeneration["generateNextMessagePrediction"] =
+    Effect.fn("MuseTextGeneration.generateNextMessagePrediction")(function* (input) {
+      const generated = yield* runMuseJson({
+        operation: "generateNextMessagePrediction",
+        ...buildNextMessagePredictionPrompt({
+          context: input.context,
+          instructions: input.instructions,
+        }),
+        modelSelection: input.modelSelection,
+      });
+      return { prediction: sanitizeNextMessagePrediction(generated.prediction) };
+    });
   return {
     generateCommitMessage,
     generatePrContent,
@@ -368,5 +382,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     generateThreadTitle,
     generateReviewGuide,
     generateTranscriptionPostProcessing,
+    generateNextMessagePrediction,
   } satisfies ProviderTextGeneration;
 });

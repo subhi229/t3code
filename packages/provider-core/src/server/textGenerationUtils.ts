@@ -85,6 +85,29 @@ export function sanitizeThreadTitle(raw: string): string {
   return `${normalized.slice(0, end).trimEnd()}...`;
 }
 
+export const MAX_NEXT_MESSAGE_PREDICTION_CHARS = 280;
+
+export function sanitizeNextMessagePrediction(raw: string | null): string | null {
+  if (raw === null) return null;
+  const stripLabel = (value: string) =>
+    value.trim().replace(/^(?:user|prediction|next message)\s*:\s*/i, "");
+  const unlabeled = stripLabel(raw.replace(/\s+/g, " "));
+  // Only a matching pair wraps the message; a lone closing quote or backtick belongs to the text.
+  const wrapped = /^(['"`])((?:(?!\1).)*)\1$/.exec(unlabeled);
+  const normalized = (wrapped ? stripLabel(wrapped[2]!) : unlabeled).trim();
+  if (normalized.length === 0) return null;
+  if (normalized.length <= MAX_NEXT_MESSAGE_PREDICTION_CHARS) return normalized;
+  const window = normalized.slice(0, MAX_NEXT_MESSAGE_PREDICTION_CHARS + 1);
+  const lastSpace = window.lastIndexOf(" ");
+  if (lastSpace > 0) return window.slice(0, lastSpace).trimEnd();
+  const last = normalized.charCodeAt(MAX_NEXT_MESSAGE_PREDICTION_CHARS - 1);
+  const end =
+    last >= 0xd800 && last <= 0xdbff
+      ? MAX_NEXT_MESSAGE_PREDICTION_CHARS - 1
+      : MAX_NEXT_MESSAGE_PREDICTION_CHARS;
+  return normalized.slice(0, end);
+}
+
 function cliLabel(cliName: string): string {
   const capitalized = cliName.charAt(0).toUpperCase() + cliName.slice(1);
   return `${capitalized} CLI (\`${cliName}\`)`;

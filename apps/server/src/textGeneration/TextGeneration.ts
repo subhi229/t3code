@@ -29,6 +29,8 @@ export type {
   BranchNameGenerationResult,
   CommitMessageGenerationInput,
   CommitMessageGenerationResult,
+  NextMessagePredictionInput,
+  NextMessagePredictionResult,
   PrContentGenerationInput,
   PrContentGenerationResult,
   ReviewGuideGenerationInput,
@@ -49,7 +51,8 @@ type TextGenerationOp =
   | "generateBranchName"
   | "generateThreadTitle"
   | "generateReviewGuide"
-  | "generateTranscriptionPostProcessing";
+  | "generateTranscriptionPostProcessing"
+  | "generateNextMessagePrediction";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -184,6 +187,16 @@ export const make = Effect.gen(function* () {
           service.generateTranscriptionPostProcessing({ ...input, modelSelection }),
       );
     }),
+    generateNextMessagePrediction: Effect.fn("TextGeneration.generateNextMessagePrediction")(
+      function (input) {
+        return generate(
+          "generateNextMessagePrediction",
+          input.modelSelection,
+          (service, modelSelection) =>
+            service.generateNextMessagePrediction({ ...input, modelSelection }),
+        );
+      },
+    ),
     generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {
       return generate(
         "generateThreadTitle",

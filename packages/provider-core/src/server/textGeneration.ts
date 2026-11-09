@@ -107,6 +107,18 @@ export interface TranscriptionPostProcessingResult {
   transcription: string;
 }
 
+export interface NextMessagePredictionInput {
+  cwd: string;
+  context: string;
+  /** The user's chosen focus for suggestions; empty for none. */
+  instructions: string;
+  modelSelection: ModelSelection;
+}
+
+export interface NextMessagePredictionResult {
+  prediction: string | null;
+}
+
 export interface ProviderTextGeneration {
   readonly generateTranscriptionPostProcessing: (
     input: TranscriptionPostProcessingInput,
@@ -131,4 +143,8 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateNextMessagePrediction: (
+    input: NextMessagePredictionInput,
+  ) => Effect.Effect<NextMessagePredictionResult, TextGenerationError>;
 }
