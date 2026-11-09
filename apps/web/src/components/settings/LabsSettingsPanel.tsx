@@ -6,6 +6,7 @@ import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
+import { PromptSuggestionSourceRows } from "./PromptSuggestionSourceSettings";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -23,6 +24,7 @@ export function LabsSettingsPanel() {
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
         <PromptSuggestionsRow />
+        <PromptSuggestionSourceRows />
         <SimlockHostsRow />
         <FastWorktreeCheckoutRow />
       </SettingsSection>
@@ -175,7 +177,7 @@ function PromptSuggestionsRow() {
       serverScoped
       {...searchableSetting("prompt-suggestions-beta")}
       settingKeys={["promptSuggestionsEnabled"]}
-      description="Show a predicted next message in the empty composer after a Claude or Codex turn. Tab uses it. Each is an extra cached request on your plan. Needs Codex 0.165+. Claude threads update on restart."
+      description="Show a predicted next message in the empty composer after a turn. Tab uses it. Built-in needs Codex 0.165+, and Claude threads update on restart. My model works with any provider."
       control={
         <ScopedSwitch
           settingKeys={["promptSuggestionsEnabled"]}
