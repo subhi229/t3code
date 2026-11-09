@@ -1,6 +1,10 @@
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadTitlePrompt } from "./textGenerationPrompts.ts";
+import {
+  buildNextMessagePredictionPrompt,
+  buildThreadTitlePrompt,
+} from "./textGenerationPrompts.ts";
 import { normalizeCliError } from "./textGenerationUtils.ts";
 
 describe("normalizeCliError", () => {
@@ -33,5 +37,37 @@ describe("buildThreadTitlePrompt", () => {
     expect(buildThreadTitlePrompt({ message: "Fix login", instructions: " " }).prompt).toContain(
       "3-8 words, fewer than 40 characters.",
     );
+  });
+});
+
+describe("buildNextMessagePredictionPrompt", () => {
+  it("embeds the conversation context and accepts a null prediction", () => {
+    const { prompt, outputSchema } = buildNextMessagePredictionPrompt({
+      context: "CTX-MARKER",
+      instructions: "",
+    });
+    const decode = Schema.decodeUnknownSync(outputSchema);
+
+    expect(prompt).toContain("CTX-MARKER");
+    expect(decode({ prediction: null })).toEqual({ prediction: null });
+    expect(decode({ prediction: "x" })).toEqual({ prediction: "x" });
+  });
+});
+
+describe("buildNextMessagePredictionPrompt focus", () => {
+  it("includes the behavior instructions as the user's focus", () => {
+    const { prompt } = buildNextMessagePredictionPrompt({
+      context: "CTX",
+      instructions: "FOCUS-MARKER",
+    });
+
+    expect(prompt).toContain("FOCUS-MARKER");
+    expect(prompt).toContain("CTX");
+  });
+
+  it("leaves the focus section out when there are no instructions", () => {
+    const { prompt } = buildNextMessagePredictionPrompt({ context: "CTX", instructions: "  " });
+
+    expect(prompt).not.toContain("User's focus");
   });
 });
