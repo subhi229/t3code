@@ -1193,6 +1193,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "enableAgentDeviceAccess",
   "textGenerationModelSelection",
   "threadTitleInstructions",
+  "promptSuggestionBehavior",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
   "reviewGuideInstructions",
@@ -1218,6 +1219,16 @@ export type ProjectProviderInstanceOverride = typeof ProjectProviderInstanceOver
 
 /** Absent keys inherit; null is a value for nullable settings.
  * providerInstances overrides fields per instance; other keys replace the whole setting. */
+export const PromptSuggestionCustomBehavior = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
+  instructions: TrimmedString.check(Schema.isMaxLength(1000)),
+});
+export type PromptSuggestionCustomBehavior = typeof PromptSuggestionCustomBehavior.Type;
+export const PromptSuggestionCustomBehaviors = Schema.Array(PromptSuggestionCustomBehavior).check(
+  Schema.isMaxLength(20),
+);
+
 export const ProjectSettingsOverrides = Schema.Struct({
   worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1231,6 +1242,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   threadTitleInstructions: Schema.optionalKey(TrimmedString),
+  promptSuggestionBehavior: Schema.optionalKey(TrimmedNonEmptyString),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideInstructions: Schema.optionalKey(TrimmedString),
@@ -1496,6 +1508,20 @@ export const ServerSettings = Schema.Struct({
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: Claude and Codex predict the next prompt after completed turns. Codex follows a change at once; open Claude threads after they restart. */
   promptSuggestionsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Built-in uses Claude's and Codex's own prediction; model uses the user's chosen model. */
+  promptSuggestionSource: Schema.Literals(["built-in", "model"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("built-in" as const)),
+  ),
+  // Null follows textGenerationModelSelection.
+  promptSuggestionModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  promptSuggestionBehavior: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("stay-on-track")),
+  ),
+  promptSuggestionCustomBehaviors: PromptSuggestionCustomBehaviors.pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1931,6 +1957,9 @@ export const ServerSettingsPatch = Schema.Struct({
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
   promptSuggestionsEnabled: Schema.optionalKey(Schema.Boolean),
+  promptSuggestionSource: Schema.optionalKey(Schema.Literals(["built-in", "model"])),
+  promptSuggestionModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  promptSuggestionCustomBehaviors: Schema.optionalKey(PromptSuggestionCustomBehaviors),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),
@@ -1954,6 +1983,7 @@ export const ServerSettingsPatch = Schema.Struct({
   ghqCloneLayout: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   threadTitleInstructions: Schema.optionalKey(TrimmedString),
+  promptSuggestionBehavior: Schema.optionalKey(TrimmedNonEmptyString),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),
