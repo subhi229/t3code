@@ -216,6 +216,11 @@ export interface ProviderSessionManagerV2Shape {
   readonly subscribePromptSuggestion: (
     threadId: ThreadId,
   ) => Stream.Stream<OrchestrationV2PromptSuggestion>;
+  /** Stores a suggestion from a source other than the provider, such as the user's chosen model. */
+  readonly publishPromptSuggestion: (
+    threadId: ThreadId,
+    suggestion: NonNullable<OrchestrationV2PromptSuggestion>,
+  ) => Effect.Effect<void>;
 }
 
 export class ProviderSessionManagerV2 extends Context.Service<
@@ -362,12 +367,36 @@ export const layerWithOptions = (
       const agentScope = yield* AgentScope;
       // Labs flag, read live: Codex per turn (its shared session outlives a toggle), Claude per query.
       // Unreadable settings keep it off.
+      // Only the built-in source asks providers; the "model" source generates its own.
       const promptSuggestionsEnabled = Option.isNone(serverSettings)
         ? Effect.succeed(false)
         : serverSettings.value.getSettings.pipe(
-            Effect.map((settings) => settings.promptSuggestionsEnabled),
+            Effect.map(
+              (settings) =>
+                settings.promptSuggestionsEnabled && settings.promptSuggestionSource === "built-in",
+            ),
             Effect.orElseSucceed(() => false),
           );
+      const customPromptSuggestionSource = Option.isNone(serverSettings)
+        ? Effect.succeed(false)
+        : serverSettings.value.getSettings.pipe(
+            Effect.map((settings) => settings.promptSuggestionSource === "model"),
+            Effect.orElseSucceed(() => false),
+          );
+      const storePromptSuggestion = (
+        threadId: ThreadId,
+        suggestion: NonNullable<OrchestrationV2PromptSuggestion>,
+      ) =>
+        SubscriptionRef.update(promptSuggestionStore, (current) => {
+          const next = new Map(current);
+          next.delete(threadId);
+          next.set(threadId, suggestion);
+          for (const key of next.keys()) {
+            if (next.size <= MAX_PROMPT_SUGGESTIONS) break;
+            next.delete(key);
+          }
+          return next;
+        });
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -2195,16 +2224,12 @@ export const layerWithOptions = (
               return commandOutput.append(event);
             }
             if (event.type === "prompt_suggestion.updated") {
-              return SubscriptionRef.update(promptSuggestionStore, (current) => {
-                const next = new Map(current);
-                next.delete(event.threadId);
-                next.set(event.threadId, { runId: event.runId, text: event.text });
-                for (const threadId of next.keys()) {
-                  if (next.size <= MAX_PROMPT_SUGGESTIONS) break;
-                  next.delete(threadId);
-                }
-                return next;
-              });
+              // Claude reads the flag per query, so an open thread can still emit after a switch.
+              return Effect.flatMap(customPromptSuggestionSource, (custom) =>
+                custom
+                  ? Effect.void
+                  : storePromptSuggestion(event.threadId, { runId: event.runId, text: event.text }),
+              );
             }
             const releaseLiveOutput =
               event.type === "turn_item.updated" &&
@@ -2828,6 +2853,7 @@ export const layerWithOptions = (
             ),
         ),
         // Stored suggestions can outlive a deleted thread, so check the thread before serving one.
+        publishPromptSuggestion: storePromptSuggestion,
         subscribePromptSuggestion: (threadId) =>
           SubscriptionRef.changes(promptSuggestionStore).pipe(
             Stream.map((suggestions) => suggestions.get(threadId) ?? null),
