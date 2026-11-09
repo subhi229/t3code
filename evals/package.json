@@ -8,6 +8,7 @@
     "mcp-tool-use:regrade": "node mcp-tool-use/regrade.ts",
     "mcp-tool-use:compare": "node mcp-tool-use/compare-arms.ts",
     "thread-titles": "node --env-file-if-exists=../.env thread-titles/run.ts",
+    "next-message": "node --env-file-if-exists=../.env next-message/run.ts",
     "pr-content": "node --env-file-if-exists=../.env pr-content/run.ts",
     "voice-cleanup": "node --env-file-if-exists=../.env voice-cleanup/run.ts",
     "test-signal": "node --env-file-if-exists=../.env test-signal/run.ts",
