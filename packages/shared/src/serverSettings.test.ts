@@ -24,6 +24,7 @@ import {
   isModelSelectionProviderEnabled,
   parsePersistedServerObservabilitySettings,
   resolveReviewGuideModelSelection,
+  resolvePromptSuggestionModelSelection,
   resolveSourceControlWriterModelSelection,
   resolveSpeechPostProcessingModelSelection,
 } from "./serverSettings.ts";
@@ -1070,5 +1071,53 @@ describe("resolveSpeechPostProcessingModelSelection", () => {
       applyServerSettingsPatch(pinned, { speechPostProcessingModelSelection: null })
         .speechPostProcessingModelSelection,
     ).toBeNull();
+  });
+});
+
+describe("resolvePromptSuggestionModelSelection", () => {
+  const projectId = ProjectId.make("project:suggestions");
+  const textGeneration = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-luna");
+  const own = createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-haiku-5-5", [
+    { id: "effort", value: "low" },
+  ]);
+  const base = {
+    ...DEFAULT_SERVER_SETTINGS,
+    textGenerationModelSelection: textGeneration,
+    promptSuggestionModelSelection: own,
+  };
+
+  it("uses its own model, or the text generation model when it has none", () => {
+    expect(resolvePromptSuggestionModelSelection(base, undefined, projectId)).toEqual(own);
+    expect(
+      resolvePromptSuggestionModelSelection(
+        { ...base, promptSuggestionModelSelection: null },
+        undefined,
+        projectId,
+      ),
+    ).toBe(textGeneration);
+  });
+
+  it("falls back when the project turns off the suggestion model's provider", () => {
+    const settings = {
+      ...base,
+      projectSettingsOverrides: {
+        [projectId]: { providerInstances: { [own.instanceId]: { enabled: false } } },
+      },
+    };
+    expect(resolvePromptSuggestionModelSelection(settings, undefined, projectId)).toBe(
+      textGeneration,
+    );
+  });
+
+  it("replaces the whole selection on patch, so a new model drops the old effort", () => {
+    const patched = applyServerSettingsPatch(base, {
+      promptSuggestionModelSelection: createModelSelection(
+        ProviderInstanceId.make("codex"),
+        "gpt-6-luna",
+      ),
+    });
+    expect(patched.promptSuggestionModelSelection).toEqual(
+      createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-luna"),
+    );
   });
 });

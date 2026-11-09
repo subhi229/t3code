@@ -8,10 +8,8 @@ import {
 } from "@t3tools/contracts";
 import { latestExecutedRun, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import {
-  resolvePromptSuggestionBehavior,
-  resolvePromptSuggestionModelSelection,
-} from "@t3tools/shared/promptSuggestionBehaviors";
+import { resolvePromptSuggestionBehavior } from "@t3tools/shared/promptSuggestionBehaviors";
+import { resolvePromptSuggestionModelSelection } from "@t3tools/shared/serverSettings";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -54,6 +52,7 @@ export class CustomPromptSuggestionService extends Context.Service<
 
 const RECENT_RUNS = 8;
 const SPEED_SAMPLES = 20;
+const MAX_CLAIMED_THREADS = 256;
 const TOOL_TURN_ITEM_TYPES = [
   "command_execution",
   "file_change",
@@ -80,7 +79,7 @@ function activityLabel(item: OrchestrationV2TurnItem): string {
   return item.title ?? detail ?? item.type;
 }
 
-function median(values: ReadonlyArray<number>): number | null {
+export function median(values: ReadonlyArray<number>): number | null {
   if (values.length === 0) return null;
   const sorted = values.toSorted((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -99,6 +98,39 @@ const make = Effect.gen(function* () {
   const watched = yield* Ref.make<ReadonlyMap<ThreadId, number>>(new Map());
   const durations = yield* SubscriptionRef.make<ReadonlyArray<number>>([]);
   const fibers = yield* FiberMap.make<ThreadId>();
+  // The run each thread last generated for, so a re-announced run or a reopened thread costs nothing.
+  const claimed = yield* Ref.make<ReadonlyMap<ThreadId, RunId>>(new Map());
+
+  const modelSourceOn = serverSettings.getSettings.pipe(
+    Effect.map(
+      (settings) =>
+        settings.promptSuggestionsEnabled && settings.promptSuggestionSource === "model",
+    ),
+    Effect.orElseSucceed(() => false),
+  );
+  const isClaimed = (threadId: ThreadId, runId: RunId) =>
+    Ref.get(claimed).pipe(Effect.map((current) => current.get(threadId) === runId));
+  const claim = (threadId: ThreadId, runId: RunId) =>
+    Ref.modify(claimed, (current) => {
+      if (current.get(threadId) === runId) return [false, current] as const;
+      const next = new Map(current);
+      next.delete(threadId);
+      next.set(threadId, runId);
+      for (const key of next.keys()) {
+        if (next.size <= MAX_CLAIMED_THREADS) break;
+        next.delete(key);
+      }
+      return [true, next] as const;
+    });
+  const latestCompletedRunId = Effect.fn("CustomPromptSuggestionService.latestCompletedRunId")(
+    function* (threadId: ThreadId) {
+      const structure = yield* threads.getThreadRecords(threadId, ["runs"]);
+      const latestRun = latestExecutedRun(
+        structure.runs.filter((run) => run.status !== "rolled_back"),
+      );
+      return latestRun?.status === "completed" ? latestRun.id : null;
+    },
+  );
 
   const isWatched = (threadId: ThreadId) =>
     Ref.get(watched).pipe(Effect.map((current) => (current.get(threadId) ?? 0) > 0));
@@ -203,9 +235,12 @@ const make = Effect.gen(function* () {
         turnItems,
       }),
       instructions: resolvePromptSuggestionBehavior(settings).instructions,
-      modelSelection: resolvePromptSuggestionModelSelection(settings),
+      modelSelection: resolvePromptSuggestionModelSelection(
+        settings,
+        undefined,
+        structure.thread.projectId,
+      ),
     });
-    if (result.prediction === null) return null;
     const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt;
     yield* SubscriptionRef.update(durations, (current) =>
       [...current, elapsedMs].slice(-SPEED_SAMPLES),
@@ -216,33 +251,42 @@ const make = Effect.gen(function* () {
   const onRunCompleted: CustomPromptSuggestionService["Service"]["onRunCompleted"] = Effect.fn(
     "CustomPromptSuggestionService.onRunCompleted",
   )(function* (threadId, runId) {
-    if (!(yield* isWatched(threadId))) return;
+    if (!(yield* isWatched(threadId)) || !(yield* modelSourceOn)) return;
+    if (!(yield* claim(threadId, runId))) return;
     const text = yield* generate(threadId, runId).pipe(
       // Interruption passes through: a newer run replaced this one.
       Effect.catch((cause) => unavailable(cause)),
       Effect.catchDefect((cause) => unavailable(cause)),
     );
-    if (text !== null) yield* sessions.publishPromptSuggestion(threadId, { runId, text });
+    if (text === null) return;
+    // The source or the thread can change while a slow model answers.
+    const stillCurrent =
+      (yield* modelSourceOn) &&
+      (yield* latestCompletedRunId(threadId).pipe(Effect.orElseSucceed(() => null))) === runId;
+    if (stillCurrent) yield* sessions.publishPromptSuggestion(threadId, { runId, text });
   });
 
   const unavailable = (cause: unknown) =>
     Effect.logDebug("custom prompt suggestion unavailable", { cause }).pipe(Effect.as(null));
 
+  // A run can be announced as completed again; keep its generation instead of restarting it.
   const trigger: CustomPromptSuggestionService["Service"]["trigger"] = (threadId, runId) =>
-    FiberMap.run(fibers, threadId, onRunCompleted(threadId, runId)).pipe(Effect.asVoid);
+    Effect.flatMap(isClaimed(threadId, runId), (same) =>
+      same
+        ? Effect.void
+        : FiberMap.run(fibers, threadId, onRunCompleted(threadId, runId)).pipe(Effect.asVoid),
+    );
 
   /** Reopening a thread: generate for its latest completed run unless one is already shown. */
   const ensureLatest = Effect.fn("CustomPromptSuggestionService.ensureLatest")(function* (
     threadId: ThreadId,
   ) {
-    const structure = yield* threads.getThreadRecords(threadId, ["runs"]);
-    const latestRun = latestExecutedRun(
-      structure.runs.filter((run) => run.status !== "rolled_back"),
-    );
-    if (latestRun?.status !== "completed") return;
+    if (!(yield* modelSourceOn)) return;
+    const latestRunId = yield* latestCompletedRunId(threadId);
+    if (latestRunId === null || (yield* isClaimed(threadId, latestRunId))) return;
     const current = yield* sessions.subscribePromptSuggestion(threadId).pipe(Stream.runHead);
-    if (Option.isSome(current) && current.value?.runId === latestRun.id) return;
-    yield* FiberMap.run(fibers, threadId, onRunCompleted(threadId, latestRun.id), {
+    if (Option.isSome(current) && current.value?.runId === latestRunId) return;
+    yield* FiberMap.run(fibers, threadId, onRunCompleted(threadId, latestRunId), {
       onlyIfMissing: true,
     });
   });
@@ -267,7 +311,9 @@ const make = Effect.gen(function* () {
     Stream.runForEach(threads.streamDomainEvents, (event) =>
       event.type === "run.updated" && event.payload.status === "completed"
         ? trigger(event.threadId, event.payload.id)
-        : Effect.void,
+        : event.type === "run.created"
+          ? FiberMap.remove(fibers, event.threadId)
+          : Effect.void,
     ),
   );
 

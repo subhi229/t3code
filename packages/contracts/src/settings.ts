@@ -1179,8 +1179,6 @@ export const ProjectProviderInstanceOverride = Schema.Struct({
 });
 export type ProjectProviderInstanceOverride = typeof ProjectProviderInstanceOverride.Type;
 
-/** Absent keys inherit; null is a value for nullable settings.
- * providerInstances overrides fields per instance; other keys replace the whole setting. */
 export const PromptSuggestionCustomBehavior = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(40)),
@@ -1191,6 +1189,8 @@ export const PromptSuggestionCustomBehaviors = Schema.Array(PromptSuggestionCust
   Schema.isMaxLength(20),
 );
 
+/** Absent keys inherit; null is a value for nullable settings.
+ * providerInstances overrides fields per instance; other keys replace the whole setting. */
 export const ProjectSettingsOverrides = Schema.Struct({
   worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),

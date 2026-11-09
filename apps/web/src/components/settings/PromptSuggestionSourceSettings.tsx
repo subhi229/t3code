@@ -1,6 +1,6 @@
 import type { PromptSuggestionCustomBehavior } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
-import { resolvePromptSuggestionModelSelection } from "@t3tools/shared/promptSuggestionBehaviors";
+import { resolvePromptSuggestionModelSelection } from "@t3tools/shared/serverSettings";
 
 import { randomUUID } from "../../lib/utils";
 import {
@@ -107,7 +107,11 @@ function ModelRow() {
   const selection = resolveAppModelSelectionState(
     {
       ...settings,
-      textGenerationModelSelection: resolvePromptSuggestionModelSelection(settings),
+      textGenerationModelSelection: resolvePromptSuggestionModelSelection(
+        settings,
+        targets.providers,
+        null,
+      ),
     },
     targets.providers,
   );
@@ -238,8 +242,11 @@ function BehaviorRow() {
 }
 
 function CustomBehaviorsRow() {
+  const { scope } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
+  // Custom behaviors are environment-wide; a project can only pick one from the behavior list.
+  const editable = scope.kind !== "project" && scope.kind !== "checkout";
   const behaviors = settings.promptSuggestionCustomBehaviors;
   const save = (next: ReadonlyArray<PromptSuggestionCustomBehavior>) =>
     updateSettings({ promptSuggestionCustomBehaviors: next });
@@ -267,7 +274,7 @@ function CustomBehaviorsRow() {
         </Button>
       }
     >
-      {behaviors.length > 0 ? (
+      {behaviors.length > 0 && editable ? (
         <div className="flex max-w-2xl flex-col gap-3 pb-3.5">
           {behaviors.map((behavior) => (
             <div key={behavior.id} className="flex flex-col gap-2">
@@ -285,12 +292,16 @@ function CustomBehaviorsRow() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => {
-                    save(behaviors.filter((candidate) => candidate.id !== behavior.id));
-                    if (settings.promptSuggestionBehavior === behavior.id) {
-                      updateSettings({ promptSuggestionBehavior: "stay-on-track" });
-                    }
-                  }}
+                  onClick={() =>
+                    updateSettings({
+                      promptSuggestionCustomBehaviors: behaviors.filter(
+                        (candidate) => candidate.id !== behavior.id,
+                      ),
+                      ...(settings.promptSuggestionBehavior === behavior.id
+                        ? { promptSuggestionBehavior: "stay-on-track" }
+                        : {}),
+                    })
+                  }
                 >
                   Delete
                 </Button>

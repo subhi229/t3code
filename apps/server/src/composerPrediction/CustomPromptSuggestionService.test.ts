@@ -14,6 +14,8 @@ import {
   TextGenerationError,
   ThreadId,
   TurnItemId,
+  EnvironmentId,
+  type OrchestrationV2DelegatedFrom,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2PromptSuggestion,
   type OrchestrationV2RunStatus,
@@ -38,10 +40,12 @@ import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CustomPromptSuggestions from "./CustomPromptSuggestionService.ts";
+import * as Fiber from "effect/Fiber";
 
 const projectId = ProjectId.make("project:custom-prompt-suggestion");
 const workspaceRoot = "/repo";
@@ -119,6 +123,7 @@ function makeHarness(
       layerOrchestrator,
       layerThreadManagement,
       layerSuggestions.pipe(Layer.provideMerge(layerSessions)),
+      layerServerSettings,
       layerDatabase,
     ),
     generateNextMessagePrediction,
@@ -138,11 +143,17 @@ function watch(threadId: ThreadId) {
   });
 }
 
-function createThread(name: string) {
+function createThread(
+  name: string,
+  extra: { readonly delegatedFrom?: OrchestrationV2DelegatedFrom } = {},
+) {
   return Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
     const threadId = ThreadId.make(name);
-    yield* threads.dispatch({
+    // Only server-stamped link work may name a remote parent, so delegated threads skip the client path.
+    const dispatch = extra.delegatedFrom === undefined ? threads.dispatch : orchestrator.dispatch;
+    yield* dispatch({
       type: "thread.create",
       commandId: CommandId.make(`${name}:create`),
       threadId,
@@ -155,6 +166,12 @@ function createThread(name: string) {
       worktreePath: workspaceRoot,
       createdBy: "user",
       creationSource: "web",
+      ...(extra.delegatedFrom === undefined
+        ? {}
+        : {
+            delegatedFrom: extra.delegatedFrom,
+            linkOrigin: { sessionId: "link-session", label: "Linked environment" },
+          }),
     });
     return threadId;
   });
@@ -707,5 +724,127 @@ describe("CustomPromptSuggestionService", () => {
       assert.include(context, "NEW-PLAN");
       assert.notInclude(context, "OLD-STEP");
     }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("skips delegated threads", () => {
+    const harness = makeHarness(predicted);
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const threadId = yield* createThread("thread:delegated", {
+        delegatedFrom: {
+          environmentId: EnvironmentId.make("environment:other"),
+          threadId: ThreadId.make("thread:parent"),
+          title: "Parent",
+        },
+      });
+      yield* watch(threadId);
+      const runId = RunId.make("run:delegated:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "do it", assistant: "done" });
+
+      yield* service.onRunCompleted(threadId, runId);
+
+      assert.strictEqual(harness.generateNextMessagePrediction.mock.calls.length, 0);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("does not regenerate when the same run completes again", () => {
+    const harness = makeHarness(() => Effect.succeed({ prediction: null }));
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const threadId = yield* createThread("thread:repeat");
+      yield* watch(threadId);
+      const runId = RunId.make("run:repeat:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "hi", assistant: "hello" });
+
+      yield* service.onRunCompleted(threadId, runId);
+      yield* service.onRunCompleted(threadId, runId);
+
+      assert.strictEqual(harness.generateNextMessagePrediction.mock.calls.length, 1);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("does not publish when the source changes during generation", () => {
+    const started = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    const harness = makeHarness(() =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.as({ prediction: "Late" }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const threadId = yield* createThread("thread:switched");
+      yield* watch(threadId);
+      const runId = RunId.make("run:switched:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "hi", assistant: "hello" });
+      const fiber = yield* service.onRunCompleted(threadId, runId).pipe(Effect.forkScoped);
+      yield* Deferred.await(started);
+
+      yield* settings.updateSettings({ promptSuggestionSource: "built-in" });
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(fiber);
+
+      assert.strictEqual(yield* Queue.size(yield* PublishedSuggestions), 0);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("does not publish for a run that is no longer the latest", () => {
+    const started = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    const harness = makeHarness(() =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.as({ prediction: "Stale" }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const threadId = yield* createThread("thread:superseded");
+      yield* watch(threadId);
+      const first = RunId.make("run:superseded:1");
+      yield* recordRun({ threadId, runId: first, ordinal: 1, user: "one", assistant: "first" });
+      const fiber = yield* service.onRunCompleted(threadId, first).pipe(Effect.forkScoped);
+      yield* Deferred.await(started);
+
+      yield* recordRun({
+        threadId,
+        runId: RunId.make("run:superseded:2"),
+        ordinal: 2,
+        user: "two",
+        assistant: "second",
+      });
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(fiber);
+
+      assert.strictEqual(yield* Queue.size(yield* PublishedSuggestions), 0);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("successful empty results count toward speed", () => {
+    const harness = makeHarness(() => Effect.succeed({ prediction: null }));
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const threadId = yield* createThread("thread:empty-speed");
+      yield* watch(threadId);
+      const runId = RunId.make("run:empty-speed:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "thanks", assistant: "done" });
+
+      yield* service.onRunCompleted(threadId, runId);
+
+      assert.strictEqual(Option.getOrThrow(yield* service.speed.pipe(Stream.runHead)).samples, 1);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+});
+
+describe("median", () => {
+  it.each([
+    [[], null],
+    [[3_000], 3_000],
+    [[1_000, 3_000, 2_000], 2_000],
+    [[1_000, 2_000, 3_000, 4_000], 2_500],
+  ])("median(%j) is %j", (values, expected) => {
+    assert.strictEqual(CustomPromptSuggestions.median(values), expected);
   });
 });

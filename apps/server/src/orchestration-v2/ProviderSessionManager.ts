@@ -2852,8 +2852,8 @@ export const layerWithOptions = (
               ),
             ),
         ),
-        // Stored suggestions can outlive a deleted thread, so check the thread before serving one.
         publishPromptSuggestion: storePromptSuggestion,
+        // Stored suggestions can outlive a deleted thread, so check the thread before serving one.
         subscribePromptSuggestion: (threadId) =>
           SubscriptionRef.changes(promptSuggestionStore).pipe(
             Stream.map((suggestions) => suggestions.get(threadId) ?? null),

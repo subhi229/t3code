@@ -158,6 +158,20 @@ export function resolveReviewGuideModelSelection(
     : resolveSourceControlWriterModelSelection(settings, providers, projectId);
 }
 
+/** Prompt suggestions follow the text generation model unless their own usable model is set. */
+export function resolvePromptSuggestionModelSelection(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+): ModelSelection {
+  const selection = settings.promptSuggestionModelSelection;
+  return selection &&
+    resolveTextGenerationSelectionEnabled(settings, projectId, selection.instanceId) &&
+    isTextGenerationTargetUsable(settings, providers, selection.instanceId)
+    ? selection
+    : settings.textGenerationModelSelection;
+}
+
 /** Transcript cleanup follows the text generation model unless its own usable model is set. */
 export function resolveSpeechPostProcessingModelSelection(
   settings: ServerSettings,
@@ -605,6 +619,9 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.speechPostProcessingModelSelection !== undefined
       ? { speechPostProcessingModelSelection: patch.speechPostProcessingModelSelection }
+      : {}),
+    ...(patch.promptSuggestionModelSelection !== undefined
+      ? { promptSuggestionModelSelection: patch.promptSuggestionModelSelection }
       : {}),
     ...(patch.defaultProjectScripts !== undefined
       ? { defaultProjectScripts: patch.defaultProjectScripts }
