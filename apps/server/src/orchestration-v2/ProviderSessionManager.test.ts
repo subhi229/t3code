@@ -495,6 +495,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
     readonly spawnBeforeOpen?: boolean;
     readonly scopeCloseReached?: Deferred.Deferred<void>;
     readonly eventStreamsEnded?: Queue.Queue<ProviderSessionId>;
+    readonly promptSuggestionFlags?: Ref.Ref<ReadonlyArray<Effect.Effect<boolean>>>;
   } = {},
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
@@ -522,6 +523,10 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (input) =>
       Effect.gen(function* () {
+        if (options.promptSuggestionFlags !== undefined && input.promptSuggestions !== undefined) {
+          const flag = input.promptSuggestions;
+          yield* Ref.update(options.promptSuggestionFlags, (flags) => [...flags, flag]);
+        }
         if (options.spawnBeforeOpen === true) {
           yield* countClose;
           if (options.hangSessionScopeClose === true) yield* hangClose;
@@ -687,6 +692,7 @@ function layerTest(input: {
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
   readonly installationGateLayer?: Layer.Layer<ProviderInstallationGate.ProviderInstallationGate>;
+  readonly promptSuggestionFlags?: Ref.Ref<ReadonlyArray<Effect.Effect<boolean>>>;
 }) {
   const layerConfiguredEventSink =
     input.flakyReleaseWrites !== undefined
@@ -739,6 +745,9 @@ function layerTest(input: {
       ...(input.eventStreamsEnded === undefined
         ? {}
         : { eventStreamsEnded: input.eventStreamsEnded }),
+      ...(input.promptSuggestionFlags === undefined
+        ? {}
+        : { promptSuggestionFlags: input.promptSuggestionFlags }),
     }).pipe(Effect.map(ProviderAdapterRegistry.layerSingle)),
   );
   const layerConfiguredMcpRegistry =
@@ -3334,6 +3343,80 @@ it.effect(
       });
 
       yield* effect.pipe(Effect.scoped, Effect.provide(layerTest({ state, idleTimeoutMs: 1_000 })));
+    }),
+);
+
+it.effect("ProviderSessionManagerV2 serves a suggestion published by another source", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const effect = Effect.gen(function* () {
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread-provider-session-manager-published");
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+      const received = yield* Queue.unbounded<OrchestrationV2PromptSuggestion>();
+      yield* manager.subscribePromptSuggestion(threadId).pipe(
+        Stream.runForEach((suggestion) => Queue.offer(received, suggestion)),
+        Effect.forkScoped,
+      );
+      assert.isNull(yield* Queue.take(received));
+
+      yield* manager.publishPromptSuggestion(threadId, { runId, text: "run the tests" });
+
+      assert.deepEqual(yield* Queue.take(received), { runId, text: "run the tests" });
+    });
+
+    yield* effect.pipe(Effect.scoped, Effect.provide(layerTest({ state, idleTimeoutMs: 1_000 })));
+  }),
+);
+
+it.effect.each([
+  { source: "built-in" as const, expected: true },
+  { source: "model" as const, expected: false },
+])(
+  "ProviderSessionManagerV2 asks adapters for built-in suggestions only from the built-in source ($source)",
+  ({ source, expected }) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const flags = yield* Ref.make<ReadonlyArray<Effect.Effect<boolean>>>([]);
+      const effect = Effect.gen(function* () {
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make(`thread-provider-session-manager-source-${source}`);
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+        const [flag] = yield* Ref.get(flags);
+        assert.strictEqual(yield* flag!, expected);
+      });
+
+      yield* effect.pipe(
+        Effect.scoped,
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1_000,
+            promptSuggestionFlags: flags,
+            serverSettingsLayer: ServerSettings.layerTest({
+              promptSuggestionsEnabled: true,
+              promptSuggestionSource: source,
+            }),
+          }),
+        ),
+      );
     }),
 );
 
