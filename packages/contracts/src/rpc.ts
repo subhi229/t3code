@@ -233,6 +233,7 @@ import {
   OrchestrationV2GetThreadProjectionError,
   OrchestrationV2RpcSchemas,
   OrchestrationV2ThreadLaunchError,
+  PromptSuggestionSpeed,
 } from "./orchestrationV2.ts";
 import {
   ProjectCreateNewInput,
@@ -516,6 +517,7 @@ export const WS_METHODS = {
   serverRunStorageCleanup: "server.runStorageCleanup",
   serverGetStorageCleanupReport: "server.getStorageCleanupReport",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
+  serverSubscribePromptSuggestionSpeed: "server.subscribePromptSuggestionSpeed",
   serverReclaimDatabaseSpace: "server.reclaimDatabaseSpace",
   peerLinksList: "peerLinks.list",
   peerLinksLink: "peerLinks.link",
@@ -809,6 +811,16 @@ const WsServerGetStorageCleanupReportRpc = Rpc.make(WS_METHODS.serverGetStorageC
   stream: true,
   error: EnvironmentAuthorizationError,
 });
+
+const WsServerSubscribePromptSuggestionSpeedRpc = Rpc.make(
+  WS_METHODS.serverSubscribePromptSuggestionSpeed,
+  {
+    payload: Schema.Struct({}),
+    success: PromptSuggestionSpeed,
+    stream: true,
+    error: EnvironmentAuthorizationError,
+  },
+);
 
 const WsServerGetDatabaseStorageRpc = Rpc.make(WS_METHODS.serverGetDatabaseStorage, {
   payload: Schema.Struct({}),
@@ -2089,6 +2101,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRunStorageCleanupRpc,
   WsServerGetStorageCleanupReportRpc,
   WsServerGetDatabaseStorageRpc,
+  WsServerSubscribePromptSuggestionSpeedRpc,
   WsServerReclaimDatabaseSpaceRpc,
   WsServerUpdateSettingsRpc,
   WsPeerLinksListRpc,

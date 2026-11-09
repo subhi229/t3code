@@ -45,6 +45,12 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("lets readers see how fast their prompt suggestions are", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverSubscribePromptSuggestionSpeed)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
+
   it("keeps triage, which seeds an agent that reads logs and the database, behind operate scope", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverPrepareTriage)).toBe(
       AuthOrchestrationOperateScope,

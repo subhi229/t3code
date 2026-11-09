@@ -3670,6 +3670,13 @@ export const OrchestrationV2PromptSuggestion = Schema.NullOr(
 );
 export type OrchestrationV2PromptSuggestion = typeof OrchestrationV2PromptSuggestion.Type;
 
+/** How long the user's chosen suggestion model recently took; medianMs is null before any. */
+export const PromptSuggestionSpeed = Schema.Struct({
+  medianMs: Schema.NullOr(Schema.Number),
+  samples: Schema.Number,
+});
+export type PromptSuggestionSpeed = typeof PromptSuggestionSpeed.Type;
+
 export const OrchestrationV2ArchivedShellSnapshot = Schema.Struct({
   schemaVersion: PositiveInt,
   snapshotSequence: NonNegativeInt,
