@@ -1438,6 +1438,11 @@ export function createServerEnvironmentAtoms<R, E>(
     tag: WS_METHODS.serverGetDatabaseStorage,
     idleTtlMs: 0,
   });
+  const promptSuggestionSpeed = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:server:prompt-suggestion-speed",
+    tag: WS_METHODS.serverSubscribePromptSuggestionSpeed,
+    idleTtlMs: 0,
+  });
   // Keyed by a JSON array of environment ids so one notice can list every machine.
   const databaseCompactionRecommendations = Atom.family((environmentIdsKey: string) => {
     const sources = (JSON.parse(environmentIdsKey) as EnvironmentId[]).map((environmentId) => ({
@@ -1485,6 +1490,7 @@ export function createServerEnvironmentAtoms<R, E>(
       concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
     }),
     databaseStorage,
+    promptSuggestionSpeed,
     databaseCompactionRecommendations,
     reclaimDatabaseSpace: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:reclaim-database-space",
