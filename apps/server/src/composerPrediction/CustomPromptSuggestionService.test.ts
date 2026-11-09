@@ -509,6 +509,106 @@ describe("CustomPromptSuggestionService", () => {
     }).pipe(Effect.scoped, Effect.provide(harness.layer));
   });
 
+  it.effect("an older run completing again does not replace the newer generation", () => {
+    const started = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    const harness = makeHarness(() =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.as({ prediction: "Second" }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const threadId = yield* createThread("thread:late-older");
+      yield* watch(threadId);
+      const first = RunId.make("run:late-older:1");
+      const second = RunId.make("run:late-older:2");
+      yield* recordRun({ threadId, runId: first, ordinal: 1, user: "one", assistant: "first" });
+      yield* recordRun({ threadId, runId: second, ordinal: 2, user: "two", assistant: "second" });
+      yield* service.trigger(threadId, second);
+      yield* Deferred.await(started);
+
+      yield* service.trigger(threadId, first);
+      yield* Deferred.succeed(release, undefined);
+
+      assert.deepStrictEqual(yield* Queue.take(yield* PublishedSuggestions), {
+        threadId,
+        runId: second,
+        text: "Second",
+      });
+      yield* service.trigger(threadId, second);
+      assert.strictEqual(harness.generateNextMessagePrediction.mock.calls.length, 1);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("a run whose generation was cancelled can still get a suggestion", () => {
+    const started = Deferred.makeUnsafe<void>();
+    const stopped = Deferred.makeUnsafe<void>();
+    let calls = 0;
+    const harness = makeHarness(() =>
+      calls++ === 0
+        ? Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)),
+          )
+        : Effect.succeed({ prediction: "Again" }),
+    );
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      yield* service.start;
+      const threadId = yield* createThread("thread:requeued");
+      yield* watch(threadId);
+      const runId = RunId.make("run:requeued:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "build it", assistant: "Built it." });
+      yield* service.trigger(threadId, runId);
+      yield* Deferred.await(started);
+
+      // A queued message cancels the generation, then is withdrawn before it starts.
+      yield* recordRun({
+        threadId,
+        runId: RunId.make("run:requeued:2"),
+        ordinal: 2,
+        user: "queued then cancelled",
+        assistant: null,
+        status: "cancelled",
+        started: false,
+      });
+      yield* Deferred.await(stopped);
+      yield* service.trigger(threadId, runId);
+
+      assert.deepStrictEqual(yield* Queue.take(yield* PublishedSuggestions), {
+        threadId,
+        runId,
+        text: "Again",
+      });
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("skips while a queued message is about to start", () => {
+    const harness = makeHarness(predicted);
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const threadId = yield* createThread("thread:queued");
+      yield* watch(threadId);
+      const runId = RunId.make("run:queued:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "build it", assistant: "Built it." });
+      yield* recordRun({
+        threadId,
+        runId: RunId.make("run:queued:2"),
+        ordinal: 2,
+        user: "then deploy",
+        assistant: null,
+        status: "queued",
+        started: false,
+      });
+
+      yield* service.onRunCompleted(threadId, runId);
+
+      assert.strictEqual(harness.generateNextMessagePrediction.mock.calls.length, 0);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
   it.effect("uses the project's behavior override", () => {
     const harness = makeHarness(predicted, {
       ...enabledSettings,
@@ -834,6 +934,25 @@ describe("CustomPromptSuggestionService", () => {
       yield* service.onRunCompleted(threadId, runId);
 
       assert.strictEqual(Option.getOrThrow(yield* service.speed.pipe(Stream.runHead)).samples, 1);
+    }).pipe(Effect.scoped, Effect.provide(harness.layer));
+  });
+
+  it.effect("speed counts only the current suggestion model", () => {
+    const harness = makeHarness(() => Effect.succeed({ prediction: "Next" }));
+    return Effect.gen(function* () {
+      const service = yield* CustomPromptSuggestions.CustomPromptSuggestionService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const threadId = yield* createThread("thread:speed-model");
+      yield* watch(threadId);
+      const runId = RunId.make("run:speed-model:1");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "hi", assistant: "hello" });
+      yield* service.onRunCompleted(threadId, runId);
+
+      yield* settings.updateSettings({
+        textGenerationModelSelection: { ...modelSelection, model: "gpt-5.1-codex-mini" },
+      });
+
+      assert.strictEqual(Option.getOrThrow(yield* service.speed.pipe(Stream.runHead)).samples, 0);
     }).pipe(Effect.scoped, Effect.provide(harness.layer));
   });
 });
